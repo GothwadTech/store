@@ -780,8 +780,8 @@ export default {
             for (const [from, to] of Object.entries(fields)) if (from in body) patchRow[to] = str(body[from]) || null;
             if ('kind' in body) patchRow.kind = str(body.kind) === 'game' ? 'game' : 'app';
             if ('tags' in body) patchRow.tags = strArr(body.tags);
-            // Status sirf delist/relist yahan se: publish hamesha review ke baad hi (Worker rule).
-            if ('status' in body) {
+            // An echoed status is not a transition; only actual changes need the guard.
+            if ('status' in body && str(body.status) !== str(owned.app.status)) {
               const wanted = str(body.status);
               if (wanted === 'unlisted') patchRow.status = 'unlisted';
               else if (wanted === 'published') {

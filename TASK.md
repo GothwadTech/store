@@ -1,6 +1,6 @@
 # 📋 TASK.md — Gothwad Store live status
 
-**Last updated:** 2026-10-16 (Session 2) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
+**Last updated:** 2026-10-16 (Draft listing save fix) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
 
 ## ✅ Ho gaya (Session 1 — 2026-10-16)
 
@@ -58,6 +58,20 @@
 - [x] Verify: `npm run build` + worker typecheck pass; mock Supabase/Accounts
       ke against poora E2E (register→create→release→submit→reject→resubmit→
       approve→store→review/reply→wishlist/report→download dedupe→stats) pass
+
+## ✅ Draft listing save fix (2026-10-16)
+
+- [x] Worker listing PATCH me current status ke barabar bheja gaya status no-op
+      hai; guard sirf actual transition par lagta hai. Bina live release ke
+      `draft → published` ab bhi reject hota hai.
+- [x] Console listing-save ab sirf editable listing fields + screenshots bhejta
+      hai, poora app/status nahi. Publish/Unpublish ka alag flow unchanged hai.
+- [x] `npm test` regression suite (Node 22.13+): Draft listing without status /
+      same status saves; in-review/published same-status saves; unauthorized
+      status transitions aur publish without live release reject hote hain.
+      Accounts/Supabase mocked hain; production services ki zaroorat nahi.
+- [x] Verify: `npm test` (6 tests), `npm run build`, aur
+      `npx tsc -p worker/tsconfig.json --noEmit` pass.
 
 ## 🔜 Agla (owner ke human steps pehle — docs/SETUP.md)
 

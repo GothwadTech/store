@@ -392,7 +392,11 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
       </div>
 
       {tab === 'listing' && (
-        <form onSubmit={(e) => { e.preventDefault(); setError(''); void updateApp(app.id, { ...form, screenshots: shots }).then(() => setMsg('Store listing saved. Text and image changes go live immediately; APKs always require review.')).catch((err: Error) => setError(err.message)); }}>
+        <form onSubmit={(e) => { e.preventDefault(); setError(''); void updateApp(app.id, {
+          name: form.name, category: form.category, shortDesc: form.shortDesc, fullDesc: form.fullDesc,
+          iconUrl: form.iconUrl, supportEmail: form.supportEmail, privacyPolicyUrl: form.privacyPolicyUrl,
+          screenshots: shots,
+        }).then(() => setMsg('Store listing saved. Text and image changes go live immediately; APKs always require review.')).catch((err: Error) => setError(err.message)); }}>
           <div className="space-y-5">
             <Card title="App details" desc="How your app appears on Gothwad Store.">
               <div className="space-y-5">
