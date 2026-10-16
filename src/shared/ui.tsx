@@ -1,7 +1,9 @@
 import { Star, Store } from 'lucide-react';
 import type { StoreApp } from '../types';
 import { formatCount } from '../lib/storage';
-import { CATEGORIES } from '../data/seed';
+import { CATEGORY_LABELS } from '../data/categories';
+import { startGothwadSignIn } from '../lib/auth';
+import { useApp } from '../lib/AppContext';
 
 export function Logo({ subtitle }: { subtitle: string }) {
   return (
@@ -53,7 +55,7 @@ export function StatusBadge({ status }: { status: StoreApp['status'] }) {
 }
 
 export function categoryName(slug: string): string {
-  return CATEGORIES.find((c) => c.slug === slug)?.name ?? slug;
+  return CATEGORY_LABELS[slug] ?? slug;
 }
 
 export function AppCard({ app, onOpen }: { app: StoreApp; onOpen: (a: StoreApp) => void }) {
@@ -96,7 +98,8 @@ export function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-export function SignInPrompt({ onDemo, what }: { onDemo: () => void; what: string }) {
+export function SignInPrompt({ what }: { what: string }) {
+  const { demoModeAvailable, signInDemo } = useApp();
   return (
     <div className="mx-auto max-w-md px-4 py-16 text-center">
       <div className="rounded-2xl border border-white/10 bg-[#2a2a2a] p-8 shadow-xl shadow-black/20">
@@ -106,14 +109,16 @@ export function SignInPrompt({ onDemo, what }: { onDemo: () => void; what: strin
           One Gothwad Account for Mail, Drive, Store, and more. Sign in to continue to {what}.
         </p>
         <button
-          onClick={() => { void import('../lib/auth').then((m) => m.startGothwadSignIn()); }}
+          onClick={() => { void startGothwadSignIn(); }}
           className="mt-6 w-full rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500"
         >
           Sign in with Gothwad
         </button>
-        <button onClick={onDemo} className="mt-2.5 w-full rounded-lg border border-white/15 px-5 py-2.5 text-sm font-medium text-neutral-200 transition hover:bg-white/5">
-          Explore demo mode (preview / dev only)
-        </button>
+        {demoModeAvailable && (
+          <button onClick={signInDemo} className="mt-2.5 w-full rounded-lg border border-white/15 px-5 py-2.5 text-sm font-medium text-neutral-200 transition hover:bg-white/5">
+            Explore demo mode (preview / dev only)
+          </button>
+        )}
         <p className="mt-4 text-[11px] leading-relaxed text-neutral-500">Authentication is handled at accounts.gothwadtech.com. Your password is never entered here.</p>
       </div>
     </div>

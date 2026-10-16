@@ -1,5 +1,5 @@
-// Demo/seed data - Worker/Supabase configure na ho to bhi Store jeevant dikhe.
-// Asli data Worker API (/api/store/*) se aayega; ye sirf pehla rang hai.
+// Local/preview-only demo fixtures. AppContext may initialize from these only
+// when the synchronous hostname gate allows demo mode; production uses API data.
 import type { Category, ReportItem, Review, StoreApp, Submission } from '../types';
 import { iconPlaceholder } from '../lib/storage';
 

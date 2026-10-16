@@ -7,8 +7,9 @@ import {
 import { useApp } from '../lib/AppContext';
 import { usePath } from '../lib/router';
 import { AppIcon, Logo, SignInPrompt, StatusBadge, categoryName } from '../shared/ui';
+import { BackendNotice } from '../shared/BackendNotice';
 import { apkProviderForSize, compressImage, formatBytes, formatCount } from '../lib/storage';
-import { inspectApk, uploadApk, uploadImage } from '../lib/api';
+import { devApi, inspectApk, uploadApk, uploadImage } from '../lib/api';
 import type { ApkManifestInfo, UploadedApk } from '../lib/api';
 import type { StoreApp as StoreAppType } from '../types';
 
@@ -18,6 +19,15 @@ const labelCls = 'mb-1.5 block text-[13px] font-medium text-neutral-300';
 const hintCls = 'mt-1 text-xs leading-relaxed text-neutral-500';
 const btnPrimary = 'inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40';
 const btnGhost = 'inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-transparent px-4 py-2 text-sm font-medium text-neutral-200 transition hover:bg-white/5 disabled:opacity-40';
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read image'));
+    reader.onerror = () => reject(new Error('Could not read image'));
+    reader.readAsDataURL(blob);
+  });
+}
 
 function Card({ title, desc, children, action }: { title?: string; desc?: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
@@ -137,7 +147,10 @@ function Shell({ children, navigate, path }: { children: React.ReactNode; naviga
             </button>
           </div>
         </header>
-        <div className="mx-auto w-full max-w-[1180px] flex-1 px-4 py-6 sm:px-6 sm:py-8">{children}</div>
+        <div className="mx-auto w-full max-w-[1180px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
+          <BackendNotice />
+          {children}
+        </div>
         <footer className="border-t border-white/[0.06] px-6 py-4 text-xs text-neutral-600">Gothwad Developer Console · console.gothwadtech.com</footer>
       </div>
     </div>
@@ -305,12 +318,13 @@ function CreateApp({ navigate }: { navigate: (p: string) => void }) {
 
 // ════════════════ APP DETAIL (listing / releases / reviews) ════════════════
 function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: string) => void; tab: 'listing' | 'releases' | 'reviews' }) {
-  const { updateApp, categories, releases, addRelease, submitForReview, submissions, reviews, replyReview, setAppStatus, liveReleaseOf, backendLive, isDemoUser } = useApp();
+  const { updateApp, categories, releases, addRelease, submitForReview, submissions, reviews, replyReview, setAppStatus, liveReleaseOf, backendLive, demoModeAvailable, isDemoUser } = useApp();
+  const isLocalDemo = demoModeAvailable && isDemoUser;
   const apiMode = backendLive && !isDemoUser;
   const [form, setForm] = useState(app);
   const [iconName, setIconName] = useState('');
   const [shots, setShots] = useState<string[]>(app.screenshots);
-  const [apk, setApk] = useState<{ name: string; size: number; file: File; manifest?: ApkManifestInfo | null } | null>(null);
+  const [apk, setApk] = useState<{ name: string; size: number; file: File; manifest?: ApkManifestInfo | null; sha256?: string } | null>(null);
   const [ver, setVer] = useState({ versionName: '', versionCode: '', changelog: '' });
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
@@ -326,8 +340,12 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
     setError('');
     try {
       const small = await compressImage(file, target === 'icon' ? 512 : 1080);
-      // Live mode: Worker uploads the image to ImgBB. Demo/offline: local preview only.
-      const url = apiMode ? await uploadImage(small, file.name) : URL.createObjectURL(small);
+      let url: string;
+      if (isLocalDemo) url = await blobToDataUrl(small);
+      else {
+        if (!apiMode) throw new Error('Image uploads are unavailable while the Store service is offline.');
+        url = await uploadImage(small, file.name);
+      }
       if (target === 'icon') { setForm((f) => ({ ...f, iconUrl: url })); setIconName(file.name); }
       else setShots((s) => [...s, url].slice(0, 8));
     } catch (e) {
@@ -338,12 +356,21 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
   const onApkFile = async (file: File | undefined) => {
     if (!file) return;
     setError('');
+    if (!apiMode) {
+      if (isLocalDemo) {
+        setApk({ name: file.name, size: file.size, file });
+        setMsg('Preview only: this APK will not be uploaded or stored. Enter version details and create a local demo release.');
+        return;
+      }
+      setApk(null);
+      setError('APK uploads are unavailable while the Store service is offline.');
+      return;
+    }
     setApk({ name: file.name, size: file.size, file });
-    if (!apiMode) return;
     try {
-      // Manifest auto-read: package, version, SDK and permissions fill themselves in.
-      const { manifest } = await inspectApk(file);
-      setApk({ name: file.name, size: file.size, file, manifest });
+      // Manifest auto-read: package, version, SDK, permissions and SHA-256 are read from the APK.
+      const { manifest, sha256 } = await inspectApk(file);
+      setApk({ name: file.name, size: file.size, file, manifest, sha256 });
       if (manifest.packageName && manifest.packageName !== app.packageName) {
         setError(`This APK is for ${manifest.packageName}, but this listing is ${app.packageName}. Upload the correct APK.`);
         return;
@@ -478,9 +505,11 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
                     versionName: ver.versionName, versionCode: Number(ver.versionCode), sizeBytes: apk.size,
                     changelog: ver.changelog, permissions: apk.manifest?.permissions?.length ? apk.manifest.permissions : ['android.permission.INTERNET'],
                     apkName: apk.name, apkUrl: uploaded?.url, apkProvider: uploaded?.provider, apkKey: uploaded?.key,
-                    apkSha256: uploaded?.sha256, manifest: uploaded?.manifest ?? apk.manifest ?? undefined,
+                    apkSha256: uploaded?.sha256 ?? apk.sha256, manifest: uploaded?.manifest ?? apk.manifest ?? undefined,
                   });
-                  setMsg(`Release v${rel.versionName} created (${formatBytes(apk.size)} → ${apkProviderForSize(apk.size) === 'github' ? 'GitHub · storefiles' : 'Backblaze B2'}). Submit it for review below.`);
+                  setMsg(isLocalDemo
+                    ? `Preview release v${rel.versionName} created locally (${formatBytes(apk.size)}). No APK was uploaded; submit the demo release for review below.`
+                    : `Release v${rel.versionName} created (${formatBytes(apk.size)} → ${apkProviderForSize(apk.size) === 'github' ? 'GitHub · storefiles' : 'Backblaze B2'}). Submit it for review below.`);
                   setApk(null);
                 } catch (err) {
                   setUploadPct(null);
@@ -571,34 +600,84 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
 
 // ════════════════ STATS / REVIEWS / SETTINGS ════════════════
 function StatsPage() {
-  const { apps, developer } = useApp();
-  const mine = apps.filter((a) => a.developerId === developer?.id && a.status === 'published');
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const data = useMemo(() => mine.map((a, i) => ({ app: a, vals: days.map((_, d) => 20 + ((a.downloadsCount / 97 + d * 13 + i * 7) % 90)) })), [mine]); // eslint-disable-line react-hooks/exhaustive-deps
-  const weekTotal = data.reduce((t, x) => t + x.vals.reduce((a, b) => a + Math.round(b), 0), 0);
+  const { apps, developer, demoModeAvailable, isDemoUser } = useApp();
+  const mine = useMemo(() => apps.filter((app) => app.developerId === developer?.id), [apps, developer?.id]);
+  const [statsByApp, setStatsByApp] = useState<Record<string, Awaited<ReturnType<typeof devApi.stats>>>>({});
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!mine.length) {
+      setStatsByApp({});
+      setStatsLoading(false);
+      setStatsError('');
+      return () => { cancelled = true; };
+    }
+    if (demoModeAvailable && isDemoUser) {
+      const previews = mine.map((app) => {
+        const baseline = Math.max(0, Math.round(Math.log10(app.downloadsCount + 1)));
+        const days = Array.from({ length: 7 }, (_, index) => {
+          const date = new Date();
+          date.setDate(date.getDate() - (6 - index));
+          const sampleFactor = 0.5 + ((index * 17 + app.id.length) % 10) / 10;
+          return { date: date.toISOString().slice(0, 10), count: Math.round(baseline * sampleFactor) };
+        });
+        return [app.id, { days, totalDownloads: app.downloadsCount, ratingAvg: app.ratingAvg, ratingCount: app.ratingCount }] as const;
+      });
+      setStatsByApp(Object.fromEntries(previews));
+      setStatsLoading(false);
+      setStatsError('');
+      return () => { cancelled = true; };
+    }
+    setStatsLoading(true);
+    setStatsError('');
+    void Promise.all(mine.map(async (app) => [app.id, await devApi.stats(app.id, 7)] as const))
+      .then((entries) => {
+        if (!cancelled) setStatsByApp(Object.fromEntries(entries));
+      })
+      .catch((error: Error) => {
+        if (!cancelled) setStatsError(error.message || 'Statistics could not be loaded.');
+      })
+      .finally(() => { if (!cancelled) setStatsLoading(false); });
+    return () => { cancelled = true; };
+  }, [mine, demoModeAvailable, isDemoUser]);
+
+  const weekTotal = Object.values(statsByApp).reduce((total, stats) =>
+    total + stats.days.reduce((sum, day) => sum + day.count, 0), 0);
   return (
     <main>
-      <PageHeader title="Statistics" desc="Downloads for the last 7 days. Production data comes from the Worker downloads table." />
+      <PageHeader title="Statistics" desc={demoModeAvailable && isDemoUser
+        ? 'Illustrative demo activity only; these preview values are not recorded download events.'
+        : 'Daily downloads recorded by the Store for the last 7 days.'} />
       <div className="mb-6 grid grid-cols-2 gap-3.5 xl:grid-cols-4">
-        <StatCard label="Downloads (7 days)" value={formatCount(weekTotal)} sub="Across published apps" icon={Download} />
-        <StatCard label="Published apps" value={String(mine.length)} sub="Currently live on the store" icon={Smartphone} />
-        <StatCard label="Total downloads" value={formatCount(mine.reduce((t, a) => t + a.downloadsCount, 0))} sub="All time" icon={BarChart3} />
-        <StatCard label="Total ratings" value={formatCount(mine.reduce((t, a) => t + a.ratingCount, 0))} sub="Across published apps" icon={Star} />
+        <StatCard label="Downloads (7 days)" value={statsLoading || statsError ? '—' : formatCount(weekTotal)} sub="Across your apps" icon={Download} />
+        <StatCard label="Published apps" value={String(mine.filter((app) => app.status === 'published').length)} sub="Currently live on the store" icon={Smartphone} />
+        <StatCard label="Total downloads" value={formatCount(mine.reduce((total, app) => total + app.downloadsCount, 0))} sub="All time" icon={BarChart3} />
+        <StatCard label="Total ratings" value={formatCount(mine.reduce((total, app) => total + app.ratingCount, 0))} sub="Across your apps" icon={Star} />
       </div>
       <div className="space-y-5">
-        {data.map(({ app, vals }) => (
-          <Card key={app.id} title={app.name} desc={`${formatCount(app.downloadsCount)} total downloads · ${app.ratingAvg.toFixed(1)} average rating (${formatCount(app.ratingCount)} ratings)`}>
-            <div className="flex h-36 items-end gap-2.5">
-              {vals.map((v, i) => (
-                <div key={i} className="flex flex-1 flex-col items-center gap-2">
-                  <span className="w-full rounded-t-md bg-emerald-600/80 transition hover:bg-emerald-500" style={{ height: `${Math.max(7, v)}%` }} title={`${days[i]}: ${Math.round(v)} downloads`} />
-                  <span className="text-[11px] text-neutral-500">{days[i]}</span>
+        {statsLoading && <Card><p className="py-8 text-center text-sm text-neutral-400">Loading live download statistics…</p></Card>}
+        {!statsLoading && statsError && <Card><div className="py-6 text-center"><p className="text-sm text-red-200">{statsError}</p><button onClick={() => window.location.reload()} className={`${btnGhost} mt-4`}><X size={14} /> Reload</button></div></Card>}
+        {!statsLoading && !statsError && mine.map((app) => {
+          const days = statsByApp[app.id]?.days ?? [];
+          const maxCount = Math.max(1, ...days.map((day) => day.count));
+          return (
+            <Card key={app.id} title={app.name} desc={`${formatCount(app.downloadsCount)} total downloads · ${app.ratingAvg.toFixed(1)} average rating (${formatCount(app.ratingCount)} ratings)`}>
+              {days.some((day) => day.count > 0) ? (
+                <div className="flex h-36 items-end gap-2.5">
+                  {days.map((day) => (
+                    <div key={day.date} className="flex flex-1 flex-col items-center gap-2">
+                      <span className="w-full rounded-t-md bg-emerald-600/80 transition hover:bg-emerald-500" style={{ height: day.count === 0 ? '0%' : `${Math.max(5, (day.count / maxCount) * 100)}%` }} title={`${day.date}: ${formatCount(day.count)} downloads`} />
+                      <span className="text-[11px] text-neutral-500">{new Date(`${day.date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </Card>
-        ))}
-        {!mine.length && <Card><p className="py-8 text-center text-sm text-neutral-500">Charts will appear here once you have a published app.</p></Card>}
+              ) : <p className="py-8 text-center text-sm text-neutral-500">No downloads were recorded in the last 7 days.</p>}
+            </Card>
+          );
+        })}
+        {!statsLoading && !statsError && !mine.length && <Card><p className="py-8 text-center text-sm text-neutral-500">Create your first app to see download statistics.</p></Card>}
       </div>
     </main>
   );
@@ -680,9 +759,11 @@ function Callback() {
 
 export default function ConsoleApp() {
   const [path, navigate] = usePath();
-  const { user, developer, apps, signInDemo } = useApp();
+  const { user, developer, apps, authReady, backendLive, demoModeAvailable, isDemoUser } = useApp();
   if (path === '/auth/callback') return <div className="min-h-dvh bg-[#212121] text-neutral-200"><Callback /></div>;
-  if (!user) return <div className="min-h-dvh bg-[#212121]"><SignInPrompt onDemo={signInDemo} what="Developer Console" /></div>;
+  if (!authReady) return <div className="grid min-h-dvh place-items-center bg-[#212121] text-neutral-400">Checking your Gothwad Account…</div>;
+  if (!user) return <div className="min-h-dvh bg-[#212121]"><SignInPrompt what="Developer Console" /></div>;
+  if (!backendLive && !(demoModeAvailable && isDemoUser)) return <div className="min-h-dvh bg-[#212121] px-4 py-12 text-neutral-300"><BackendNotice /><p className="mx-auto mt-5 max-w-xl text-center text-sm text-neutral-400">Developer tools are unavailable until the Store service is connected.</p></div>;
   if (!developer && path !== '/onboarding') {
     return <Shell navigate={navigate} path={path}><Onboarding /></Shell>;
   }

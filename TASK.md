@@ -1,6 +1,6 @@
 # 📋 TASK.md — Gothwad Store live status
 
-**Last updated:** 2026-10-16 (Draft listing save fix) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
+**Last updated:** 2026-10-16 (Preview-only demo; production hostname gate) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
 
 ## ✅ Ho gaya (Session 1 — 2026-10-16)
 
@@ -16,7 +16,7 @@
 - [x] **StoreApp landing** (`storeapp.*`) — Store Android app download page + QR
 - [x] Ek SPA, hostname se shell switch; preview/local me neeche mode-switcher
 - [x] Auth — "Sign in with Gothwad" PKCE flow + Worker `/api/me` (cookie/Bearer);
-      preview me Demo login (production host par demo button nahi)
+      optional local/preview demo account is host-gated off all production domains
 - [x] Worker `store` (`worker/`) — health, me, OAuth exchange, public store API,
       download counter+redirect, ImgBB image upload, APK ticket
       (GitHub worker-upload / B2 presigned PUT), GitHub Releases upload
@@ -45,8 +45,9 @@
       library, report — Worker responses `types.ts` shapes me map hote hain
 - [x] **Frontend ↔ API wiring:** naya `src/lib/api.ts`; `AppContext` ab
       Worker se hydrate hota hai (catalog → session/dev/admin bundles).
-      Backend unconfigured mile to seed + localStorage demo mode hi fallback
-      hai. Console ke image uploads `/api/uploads/image` (ImgBB) se, APK flow
+      Production backend unconfigured/unavailable ho to empty catalog + clear
+      status notice dikhta hai; local/preview retains sample data and demo-only
+      local persistence. Console ke image uploads `/api/uploads/image` (ImgBB) se, APK flow
       `apk-ticket`/`apk` (≤25MB GitHub, >25MB B2 presigned direct, progress
       ke saath) se jud gaya
 - [x] **APK manifest auto-read:** `worker/src/apk.ts` — ZIP + binary
@@ -72,6 +73,38 @@
       Accounts/Supabase mocked hain; production services ki zaroorat nahi.
 - [x] Verify: `npm test` (6 tests), `npm run build`, aur
       `npx tsc -p worker/tsconfig.json --noEmit` pass.
+
+## ✅ Session 3 (2026-10-16) — Preview-only demo; production stays API-only
+
+- [x] Retained seeded apps/reviews/submissions/reports, local persistence, demo
+      sign-in, and simulated preview actions on localhost/non-production previews.
+- [x] Synchronously gates seed state, demo identity, demo buttons, preview
+      notices, and the mode switcher by hostname before React's first render;
+      the apex and every `*.gothwadtech.com` host start empty and use Gothwad auth only.
+- [x] Production backend unconfigured/unavailable stays empty/API-only; write
+      actions cannot silently fall back to local state. Preview demo writes stay
+      local and do not upload APKs or alter the existing B2 flow.
+- [x] Real API statistics/download behavior in production and explicit backend
+      status notices; only the local demo uses labeled illustrative stats.
+      Sample APK URLs stay blank.
+- [x] Worker blocks developers from restoring suspended apps and blocks direct
+      downloads of pending releases or releases whose app is not published.
+- [x] Verified corrected tree: `npm run lint`, `npm test` (12 tests), and
+      `npm run build` pass.
+
+## 🔎 Review findings / potential improvements
+
+- [ ] Add fetch timeouts/abort handling and distinguish auth network/5xx errors
+      from a genuine signed-out session; a stalled Worker request can leave
+      initial loading open-ended.
+- [ ] Validate/version the preview `localStorage` state shape and cap or move
+      image data URLs (screenshots) to IndexedDB to avoid corrupted state or
+      quota-related loss.
+- [ ] Add a browser-level regression test that opens production-host mode
+      with stale demo storage and verifies no demo UI on the first paint; the
+      current regression test checks the synchronous guards statically.
+- [ ] After owner-only service setup, smoke-test Accounts cookie/OAuth, live
+      catalog, ImgBB, GitHub uploads, and the existing B2 upload path end-to-end.
 
 ## 🔜 Agla (owner ke human steps pehle — docs/SETUP.md)
 

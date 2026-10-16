@@ -395,7 +395,7 @@ export default {
       }
 
       if (path === '/api/store/home' || path === '/api/store/apps' || path === '/api/store/search' || path === '/api/store/charts') {
-        if (!dbConfigured(env)) return out(json({ apps: [], releases: [], reviews: [], source: 'unconfigured', message: 'Supabase is not configured; the frontend is showing demo data' }));
+        if (!dbConfigured(env)) return out(json({ apps: [], releases: [], reviews: [], source: 'unconfigured', message: 'The Store database is not configured yet.' }));
         const kind = url.searchParams.get('kind');
         const category = url.searchParams.get('category');
         const q = (url.searchParams.get('q') ?? '').replace(/[%*]/g, '').trim();
@@ -501,11 +501,13 @@ export default {
       // Download: pehle count (IP+app+day dedupe), phir asal file (GitHub/B2) par redirect
       const dlMatch = path.match(/^\/api\/download\/(.+)$/);
       if (dlMatch) {
-        if (!dbConfigured(env)) return out(err('unconfigured', 'Supabase is not configured; demo downloads are unavailable', 503));
+        if (!dbConfigured(env)) return out(err('unconfigured', 'The Store database is not configured yet; downloads are unavailable.', 503));
         const rels = await sbList<Row>(env, `app_releases?id=eq.${enc(dlMatch[1])}&select=*`);
         if (!rels.length) return out(err('not_found', 'Release not found', 404));
         const rel = rels[0];
-        if (!str(rel.apk_url)) return out(err('not_found', 'Release file not found', 404));
+        if (rel.is_live !== true || !str(rel.apk_url)) return out(err('not_found', 'Release file not found', 404));
+        const liveApps = await sbList<Row>(env, `apps?id=eq.${enc(str(rel.app_id))}&status=eq.published&select=id&limit=1`);
+        if (!liveApps.length) return out(err('not_found', 'Release file not found', 404));
         const user = await verifyUser(req, env);
         const ip = req.headers.get('CF-Connecting-IP') ?? req.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'unknown';
         const day = new Date().toISOString().slice(0, 10);
@@ -782,6 +784,9 @@ export default {
             if ('tags' in body) patchRow.tags = strArr(body.tags);
             // An echoed status is not a transition; only actual changes need the guard.
             if ('status' in body && str(body.status) !== str(owned.app.status)) {
+              if (str(owned.app.status) === 'suspended') {
+                return out(err('app_suspended', 'Only a Store admin can restore a suspended app', 403));
+              }
               const wanted = str(body.status);
               if (wanted === 'unlisted') patchRow.status = 'unlisted';
               else if (wanted === 'published') {
@@ -809,6 +814,9 @@ export default {
         if (devStatus && req.method === 'POST') {
           const owned = await ownsApp(env, user, decodeURIComponent(devStatus[1]));
           if ('error' in owned) return out(owned.error);
+          if (str(owned.app.status) === 'suspended') {
+            return out(err('app_suspended', 'Only a Store admin can restore a suspended app', 403));
+          }
           const appId = str(owned.app.id);
           if (devStatus[2] === 'relist') {
             const live = await sbList<Row>(env, `app_releases?app_id=eq.${enc(appId)}&is_live=eq.true&select=id&limit=1`);

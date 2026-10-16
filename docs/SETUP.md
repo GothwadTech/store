@@ -3,6 +3,19 @@
 Saara deployment **Cloudflare** par hai. Order wahi rakho jo neeche hai —
 aadhe steps dashboard ke hain jo sirf owner kar sakta hai.
 
+### Local / preview demo behavior
+
+`localhost` and non-production previews retain sample listings and the optional
+`pawan` demo identity for UI/workflow testing. Demo edits persist only in that
+browser; sample APKs are not real, and the preview APK action does not upload a
+file. The existing production APK upload routing (GitHub for files up to 25 MB,
+Backblaze B2 above 25 MB) is unchanged.
+
+On the apex `gothwadtech.com` and every `*.gothwadtech.com` hostname, the app
+synchronously starts with empty frontend state and hides demo sign-in, seed
+listings, and the development mode switcher. Production uses Gothwad Accounts
+and live Worker/API data only; backend failure does not fall back to samples.
+
 ---
 
 ## Step 1 — Supabase (Store ka APNA project)

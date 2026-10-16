@@ -1,8 +1,7 @@
 // ── Worker API client ───────────────────────────────────────────────
-// Saari frontend ↔ backend baat-cheet yahi se hoti hai. Browser kabhi
-// Supabase se direct baat nahi karta (pakka niyam) - sirf /api/* se.
-// Backend configure na ho (Worker 503 / source:"unconfigured") to
-// callers seed/demo state par fallback karte hain (AppContext dekho).
+// All frontend ↔ backend communication goes through /api/*; the browser
+// never connects directly to Supabase. This client reports unavailable data
+// as such; AppContext enables sample fallbacks only on non-production hosts.
 import { API_BASE } from './config';
 import { authHeaders } from './auth';
 import type { AppRelease, Category, Developer, GothwadUser, ReportItem, Review, StoreApp, Submission } from '../types';
@@ -15,11 +14,6 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
   }
-}
-
-/** Backend asal me live hai ya sirf demo/unconfigured mode chal raha hai. */
-export function isUnconfiguredError(e: unknown): boolean {
-  return e instanceof ApiError && (e.status === 503 || e.code === 'supabase_not_configured' || e.code === 'unconfigured');
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -60,8 +54,10 @@ export async function fetchSession(): Promise<SessionInfo | null> {
   }
 }
 
+export type CatalogStatus = 'ready' | 'unconfigured' | 'unavailable';
+
 export interface Catalog {
-  live: boolean;
+  status: CatalogStatus;
   apps: StoreApp[];
   releases: AppRelease[];
   reviews: Review[];
@@ -70,24 +66,25 @@ export interface Catalog {
 
 interface CatalogResponse { apps?: StoreApp[]; releases?: AppRelease[]; reviews?: Review[]; source?: string }
 
-/** Public storefront data. live=false matlab backend unconfigured hai - seed rakho. */
+/** Load live catalog records; never substitute local sample listings. */
 export async function fetchCatalog(): Promise<Catalog> {
-  const empty: Catalog = { live: false, apps: [], releases: [], reviews: [], categories: [] };
   try {
     const [appsRes, catRes] = await Promise.all([
       request<CatalogResponse>('/store/apps'),
-      request<{ categories?: Category[]; source?: string }>('/store/categories').catch(() => ({ categories: [] as Category[] })),
+      request<{ categories?: Category[]; source?: string }>('/store/categories'),
     ]);
-    if (appsRes.source === 'unconfigured') return empty;
+    if (appsRes.source === 'unconfigured' || catRes.source === 'unconfigured') {
+      return { status: 'unconfigured', apps: [], releases: [], reviews: [], categories: [] };
+    }
     return {
-      live: true,
+      status: 'ready',
       apps: appsRes.apps ?? [],
       releases: appsRes.releases ?? [],
       reviews: appsRes.reviews ?? [],
       categories: catRes.categories ?? [],
     };
   } catch {
-    return empty;
+    return { status: 'unavailable', apps: [], releases: [], reviews: [], categories: [] };
   }
 }
 
@@ -131,7 +128,12 @@ export const devApi = {
   reply: (appId: string, reviewId: string, reply: string) =>
     request<{ review: Review }>(`/dev/apps/${encodeURIComponent(appId)}/reviews/${encodeURIComponent(reviewId)}/reply`, { method: 'POST', body: JSON.stringify({ reply }) }),
   stats: (appId: string, days = 7) =>
-    request<{ days: { date: string; count: number }[]; totalDownloads: number }>(`/dev/apps/${encodeURIComponent(appId)}/stats?days=${days}`),
+    request<{
+      days: { date: string; count: number }[];
+      totalDownloads: number;
+      ratingAvg: number;
+      ratingCount: number;
+    }>(`/dev/apps/${encodeURIComponent(appId)}/stats?days=${days}`),
 };
 
 // ── Admin ───────────────────────────────────────────────────────────

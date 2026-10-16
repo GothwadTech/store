@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
   ArrowLeft, BadgeCheck, Bookmark, BookmarkCheck, ChevronRight, Download, Flag,
   Gamepad2, Home, LayoutGrid, Library, Search, ShieldCheck, Star, Trophy, X,
@@ -6,13 +6,14 @@ import {
 import { useApp } from '../lib/AppContext';
 import { usePath } from '../lib/router';
 import { categoryName, AppCard, AppIcon, AppRow, Logo, SectionTitle, SignInPrompt, Stars } from '../shared/ui';
+import { BackendNotice } from '../shared/BackendNotice';
 import { formatBytes, formatCount } from '../lib/storage';
-import { handleOAuthCallback } from '../lib/auth';
+import { handleOAuthCallback, startGothwadSignIn } from '../lib/auth';
 import type { StoreApp as StoreAppType } from '../types';
 import { useEffect } from 'react';
 
 function Header({ navigate, path }: { navigate: (p: string) => void; path: string }) {
-  const { user, signInDemo, signOut } = useApp();
+  const { user, authReady, signOut, demoModeAvailable, signInDemo } = useApp();
   const [q, setQ] = useState('');
   return (
     <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#212121]/92 backdrop-blur-xl">
@@ -34,12 +35,17 @@ function Header({ navigate, path }: { navigate: (p: string) => void; path: strin
             </button>
           ))}
         </nav>
-        {user ? (
+        {!authReady ? (
+          <span className="h-9 w-16 shrink-0 animate-pulse rounded-full bg-white/10" aria-label="Checking account" />
+        ) : user ? (
           <button onClick={signOut} title={`${user.name} - sign out`} className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-blue-500 to-violet-600 font-display text-sm font-bold text-white">
             {user.name.charAt(0)}
           </button>
         ) : (
-          <button onClick={signInDemo} className="shrink-0 rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-400">Sign in</button>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 lg:ml-0">
+            <button onClick={() => { void startGothwadSignIn(); }} className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-400">Sign in</button>
+            {demoModeAvailable && <button onClick={signInDemo} className="rounded-full border border-white/15 px-3 py-2 text-xs font-semibold text-neutral-200 hover:bg-white/5">Demo</button>}
+          </div>
         )}
       </div>
       <form className="px-4 pb-3 md:hidden" onSubmit={(e) => { e.preventDefault(); navigate(`/search?q=${encodeURIComponent(q)}`); }}>
@@ -58,6 +64,7 @@ function Rail({ apps, onOpen }: { apps: StoreAppType[]; onOpen: (a: StoreAppType
 
 function CategoryChips({ navigate }: { navigate: (p: string) => void }) {
   const { categories } = useApp();
+  if (!categories.length) return null;
   return (
     <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
       {categories.map((c) => (
@@ -70,13 +77,21 @@ function CategoryChips({ navigate }: { navigate: (p: string) => void }) {
 }
 
 function HomePage({ navigate, kind }: { navigate: (p: string) => void; kind?: 'app' | 'game' }) {
-  const { apps } = useApp();
+  const { apps, categories, catalogStatus } = useApp();
   const published = apps.filter((a) => a.status === 'published' && (!kind || a.kind === kind));
   const hero = published.filter((a) => a.featured === 'hero');
   const top = [...published].sort((a, b) => b.downloadsCount - a.downloadsCount);
   const rated = [...published].sort((a, b) => b.ratingAvg - a.ratingAvg);
   const fresh = [...published].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const open = (a: StoreAppType) => navigate(`/app/${a.packageName}`);
+  if (!published.length) {
+    const message = catalogStatus === 'loading'
+      ? 'Loading published apps…'
+      : catalogStatus === 'ready'
+        ? `No ${kind === 'game' ? 'games' : kind === 'app' ? 'apps' : 'apps or games'} have been published yet.`
+        : 'Store listings are temporarily unavailable.';
+    return <main className="mx-auto max-w-7xl px-4 pb-24 pt-16 text-center text-sm text-neutral-400">{message}</main>;
+  }
   return (
     <main className="mx-auto max-w-7xl px-4 pb-24 pt-5 sm:pt-7">
       {!kind && hero.length > 0 && (
@@ -101,7 +116,7 @@ function HomePage({ navigate, kind }: { navigate: (p: string) => void; kind?: 'a
         </section>
       )}
       <section className="mb-8"><SectionTitle title={kind === 'game' ? 'Suggested games' : kind === 'app' ? 'Suggested apps' : 'Suggested for you'} /><Rail apps={published} onOpen={open} /></section>
-      <section className="mb-8"><SectionTitle title="Categories" /><CategoryChips navigate={navigate} /></section>
+      {categories.length > 0 && <section className="mb-8"><SectionTitle title="Categories" /><CategoryChips navigate={navigate} /></section>}
       <section className="mb-8"><SectionTitle title="Top rated" sub="Highest rated by users" /><Rail apps={rated} onOpen={open} /></section>
       <section><SectionTitle title="New & updated" /><div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">{fresh.slice(0, 6).map((a) => <AppRow key={a.id} app={a} onOpen={open} />)}</div></section>
     </main>
@@ -130,32 +145,40 @@ function SearchPage({ navigate, query }: { navigate: (p: string) => void; query:
 
 function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string) => void }) {
   const ctx = useApp();
-  const { user, reviews, wishlist, toggleWishlist, recordDownload, liveReleaseOf, addReview, signInDemo, reportApp, backendLive } = ctx;
+  const { user, reviews, wishlist, toggleWishlist, liveReleaseOf, addReview, reportApp, backendLive, demoModeAvailable, isDemoUser, recordDownload, signInDemo } = ctx;
+  const canPreviewDownload = demoModeAvailable && isDemoUser;
   const rel = liveReleaseOf(app.id);
   const appReviews = reviews.filter((r) => r.appId === app.id);
   const wished = wishlist.includes(app.id);
-  const [progress, setProgress] = useState<number | null>(null);
   const [rating, setRating] = useState(5);
   const [body, setBody] = useState('');
   const [toast, setToast] = useState('');
   const similar = ctx.apps.filter((a) => a.status === 'published' && a.id !== app.id && a.category === app.category);
 
   const download = () => {
-    if (progress !== null) return;
-    setProgress(0);
-    const t = setInterval(() => {
-      setProgress((p) => {
-        if (p === null || p >= 100) {
-          clearInterval(t);
-          void recordDownload(app);
-          // Live mode me apkUrl = /api/download/:releaseId (Worker count karke asal file par bhejta hai).
-          if (backendLive && rel?.apkUrl) window.open(rel.apkUrl, '_blank', 'noopener');
-          setToast('Download started. Open the APK to install it.');
-          return 100;
-        }
-        return p + 20;
-      });
-    }, 180);
+    if (canPreviewDownload) {
+      void recordDownload(app);
+      setToast('Preview download simulated. Sample listings do not contain a real APK.');
+      return;
+    }
+    if (!backendLive || !rel?.apkUrl) {
+      setToast('A downloadable APK is not available for this app yet.');
+      return;
+    }
+    // The Worker records the download and adds it to the signed-in user's library.
+    window.open(rel.apkUrl, '_blank', 'noopener,noreferrer');
+    setToast('Your download is starting.');
+  };
+
+  const wishlistClick = () => {
+    if (!user) {
+      if (demoModeAvailable) {
+        signInDemo();
+        void toggleWishlist(app.id).catch((error: Error) => setToast(error.message));
+      } else void startGothwadSignIn();
+      return;
+    }
+    void toggleWishlist(app.id).catch((error: Error) => setToast(error.message));
   };
 
   return (
@@ -168,7 +191,7 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
           <button onClick={() => navigate(`/developer/${app.developerId}`)} className="mt-1 flex items-center gap-1 text-sm font-medium text-emerald-300 hover:underline">
             {app.developerName} {app.developerVerified && <BadgeCheck size={15} className="fill-emerald-400 text-[#212121]" />}
           </button>
-          <p className="mt-0.5 text-[13px] text-neutral-400">{categoryName(app.category)} · Ads-free · Gothwad Store verified</p>
+          <p className="mt-0.5 text-[13px] text-neutral-400">{categoryName(app.category)} · {app.kind === 'game' ? 'Game' : 'App'} · {app.packageName}</p>
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-center">
             <span><b className="flex items-center gap-1 text-sm text-white">{app.ratingAvg.toFixed(1)} <Star size={13} className="fill-white" /></b><i className="block text-[11px] not-italic text-neutral-500">{formatCount(app.ratingCount)} reviews</i></span>
             <span><b className="text-sm text-white">{formatCount(app.downloadsCount)}</b><i className="block text-[11px] not-italic text-neutral-500">Downloads</i></span>
@@ -179,10 +202,10 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3">
-        <button onClick={download} className="min-w-52 flex-1 rounded-full bg-emerald-500 px-8 py-3.5 font-display font-bold text-white shadow-xl shadow-emerald-500/20 transition hover:bg-emerald-400 sm:flex-none sm:px-14">
-          {progress === null ? <span className="flex items-center justify-center gap-2"><Download size={19} /> Install</span> : progress >= 100 ? 'Downloaded' : `Downloading ${progress}%`}
+        <button onClick={download} disabled={!canPreviewDownload && (!backendLive || !rel?.apkUrl)} className="min-w-52 flex-1 rounded-full bg-emerald-500 px-8 py-3.5 font-display font-bold text-white shadow-xl shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none sm:px-14">
+          <span className="flex items-center justify-center gap-2"><Download size={19} /> {canPreviewDownload ? 'Try preview download' : rel?.apkUrl ? 'Install' : 'APK unavailable'}</span>
         </button>
-        <button onClick={() => (user ? toggleWishlist(app.id) : signInDemo())} className="flex items-center gap-2 rounded-full border border-white/15 px-5 py-3.5 text-sm font-semibold text-neutral-100 hover:bg-white/5">
+        <button onClick={wishlistClick} className="flex items-center gap-2 rounded-full border border-white/15 px-5 py-3.5 text-sm font-semibold text-neutral-100 hover:bg-white/5">
           {wished ? <BookmarkCheck size={18} className="text-emerald-300" /> : <Bookmark size={18} />} {wished ? 'Wishlisted' : 'Wishlist'}
         </button>
       </div>
@@ -201,7 +224,9 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
           {rel?.changelog && <><h3 className="mt-6 font-display font-bold text-white">What's new</h3><p className="mt-1.5 text-sm leading-relaxed text-neutral-400">{rel.changelog}</p></>}
           <h3 className="mt-7 flex items-center gap-2 font-display font-bold text-white"><ShieldCheck size={18} className="text-emerald-300" /> Data safety & permissions</h3>
           <ul className="mt-2 space-y-1.5 text-sm text-neutral-400">
-            {(rel?.permissions.length ? rel.permissions : ['android.permission.INTERNET']).map((p) => <li key={p} className="rounded-lg bg-white/[0.04] px-3 py-2 font-mono text-xs">{p}</li>)}
+            {rel?.permissions.length
+              ? rel.permissions.map((permission) => <li key={permission} className="rounded-lg bg-white/[0.04] px-3 py-2 font-mono text-xs">{permission}</li>)
+              : <li className="rounded-lg bg-white/[0.04] px-3 py-2 text-xs">Permission information is unavailable for this release.</li>}
           </ul>
           {rel?.apkSha256 && <p className="mt-2 break-all font-mono text-[11px] text-neutral-600">SHA-256: {rel.apkSha256}</p>}
           {user && <button onClick={() => { void reportApp(app, 'Other', '').then(() => setToast('Report submitted. Our team will review it. Thank you.')).catch((err: Error) => setToast(err.message)); }} className="mt-6 flex items-center gap-1.5 text-xs text-neutral-500 hover:text-red-300"><Flag size={13} /> Report this app</button>}
@@ -234,7 +259,7 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
                 <button className="mt-3 rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-400">Post review</button>
               </form>
             ) : (
-              <button onClick={signInDemo} className="mb-6 w-full rounded-2xl border border-dashed border-white/15 px-4 py-4 text-sm text-neutral-300 hover:bg-white/[0.03]">Sign in with Gothwad to write a review</button>
+              <button onClick={() => { if (demoModeAvailable) signInDemo(); else void startGothwadSignIn(); }} className="mb-6 w-full rounded-2xl border border-dashed border-white/15 px-4 py-4 text-sm text-neutral-300 hover:bg-white/[0.03]">{demoModeAvailable ? 'Try demo mode to write a review' : 'Sign in with Gothwad to write a review'}</button>
             )}
             <div className="space-y-4">
               {appReviews.map((r) => (
@@ -260,8 +285,9 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
 }
 
 function LibraryPage({ navigate }: { navigate: (p: string) => void }) {
-  const { user, apps, library, wishlist, signInDemo } = useApp();
-  if (!user) return <SignInPrompt onDemo={signInDemo} what="Store Library" />;
+  const { user, apps, library, wishlist, authReady } = useApp();
+  if (!authReady) return <main className="mx-auto max-w-5xl px-4 py-16 text-center text-sm text-neutral-400">Checking your Gothwad Account…</main>;
+  if (!user) return <SignInPrompt what="Store Library" />;
   const lib = apps.filter((a) => library.includes(a.id));
   const wish = apps.filter((a) => wishlist.includes(a.id));
   return (
@@ -318,6 +344,7 @@ export default function StoreApp() {
   return (
     <div className="min-h-dvh bg-[#212121] text-neutral-200">
       <Header navigate={navigate} path={path} />
+      <BackendNotice />
       {page}
       <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/[0.07] bg-[#212121]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">
         {tabs.map(([to, label, Icon]) => (

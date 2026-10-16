@@ -92,16 +92,11 @@ export async function signOut() {
   sessionStorage.removeItem('gothwad_refresh_token');
 }
 
-// ── Local demo session ───────────────────────────────────────────────
-// Sirf dev/preview ke liye (production domains par button hi nahi dikhta):
-// bina asal Accounts backend ke poora Store/Console/Admin chakkar test ho jaye.
+// Local preview identity; AppContext exposes it only after isDemoModeAllowed()
+// confirms that the current hostname is not a Gothwad production domain.
 export const DEMO_USER: GothwadUser = {
   id: 'demo-user-1',
   username: 'pawan',
   name: 'Gothwad',
   email: 'pawan@gothwadtech.com',
 };
-
-export function isProductionHost(): boolean {
-  return window.location.hostname.endsWith('gothwadtech.com');
-}

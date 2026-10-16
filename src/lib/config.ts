@@ -11,17 +11,20 @@ export const API_BASE = import.meta.env.VITE_API_BASE ?? '/api';
 export type SiteMode = 'store' | 'console' | 'admin' | 'storeapp';
 
 export function detectMode(): SiteMode {
-  const host = window.location.hostname.toLowerCase();
+  const host = window.location.hostname.toLowerCase().replace(/\.$/, '');
   if (host.startsWith('storeadmin.')) return 'admin';
   if (host.startsWith('console.')) return 'console';
   if (host.startsWith('storeapp.')) return 'storeapp';
   if (host.startsWith('store.')) return 'store';
+  // Never consult local preview settings on a Gothwad production hostname.
+  if (isProductionHostCheck()) return 'store';
   // Local / Cloudflare preview (*.e2b.app, localhost) - query ya saved choice
   const q = new URLSearchParams(window.location.search).get('mode');
   if (q === 'store' || q === 'console' || q === 'admin' || q === 'storeapp') return q;
-  const saved = localStorage.getItem('gothwad-site-mode');
-  if (saved === 'store' || saved === 'console' || saved === 'admin' || saved === 'storeapp')
-    return saved;
+  try {
+    const saved = localStorage.getItem('gothwad-site-mode');
+    if (saved === 'store' || saved === 'console' || saved === 'admin' || saved === 'storeapp') return saved;
+  } catch { /* Storage may be disabled in the browser. */ }
   return 'store';
 }
 
@@ -40,5 +43,11 @@ export const SITE_MODES: { id: SiteMode; label: string }[] = [
 ];
 
 export function isProductionHostCheck(): boolean {
-  return window.location.hostname.endsWith('gothwadtech.com');
+  const host = window.location.hostname.toLowerCase().replace(/\.$/, '');
+  return host === 'gothwadtech.com' || host.endsWith('.gothwadtech.com');
+}
+
+/** Demo state/actions are permitted only on localhost and non-production previews. */
+export function isDemoModeAllowed(): boolean {
+  return !isProductionHostCheck();
 }
