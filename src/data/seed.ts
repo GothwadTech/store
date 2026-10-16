@@ -79,7 +79,7 @@ export const SEED_APPS: StoreApp[] = [
   }),
   app({
     id: 'app-store', packageName: 'com.gothwad.store', name: 'Gothwad Store',
-    category: 'tools', iconColor: '#16a34a', featured: 'top_new',
+    category: 'tools', iconUrl: '/assets/icon-512.png', iconColor: '#0284c7', featured: 'top_new',
     shortDesc: 'Discover and download Gothwad ecosystem apps',
     fullDesc:
       'Gothwad Store is the official app store of the Gothwad ecosystem. Browse apps and games, read reviews, and download APKs directly - linked with your Gothwad Account.',

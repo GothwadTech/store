@@ -1,4 +1,4 @@
-import { Star, Store } from 'lucide-react';
+import { Star } from 'lucide-react';
 import type { StoreApp } from '../types';
 import { formatCount } from '../lib/storage';
 import { CATEGORY_LABELS } from '../data/categories';
@@ -8,9 +8,13 @@ import { useApp } from '../lib/AppContext';
 export function Logo({ subtitle }: { subtitle: string }) {
   return (
     <span className="flex items-center gap-2.5 select-none">
-      <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-emerald-600 text-white">
-        <Store size={19} strokeWidth={2.3} />
-      </span>
+      <img
+        src="/assets/icon-192.png"
+        alt=""
+        width={36}
+        height={36}
+        className="h-9 w-9 shrink-0 rounded-[10px] object-cover"
+      />
       <span className="leading-tight">
         <span className="block font-display text-[16px] font-semibold tracking-tight text-white">Gothwad</span>
         <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-400">{subtitle}</span>
