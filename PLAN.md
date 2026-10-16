@@ -5,8 +5,10 @@
 > live status [`TASK.md`](TASK.md) me dekho. Yeh file design ka source of truth hai.
 >
 > **Final faisle (owner):** 4 domains ek Pages par · storage sirf
-> ImgBB + GitHub `storefiles` (APK ≤25MB) + Backblaze B2 (>25MB) ·
+> ImgBB + GitHub `storefiles` (APK ≤50MB) ·
 > **Supabase Storage bilkul nahi** (Supabase = sirf database) · manual review.
+>
+> **Current storage override (2026-10-16):** use ImgBB for images and GitHub `storefiles` for all APKs up to **50 MB**. Backblaze B2 is removed; older B2 comparison notes below are historical and must not be implemented.
 >
 > **Last updated:** 2026-10-16
 > **Repo:** `GothwadTech/store` (yeh repo) · Android app alag repo

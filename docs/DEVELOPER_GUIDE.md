@@ -17,15 +17,13 @@ id dobara nahi milegi.
 - Privacy policy URL (agar app personal data leta hai to lazmi)
 
 ## 4. APK upload karo
-**Releases → Naya release** → APK file chuno. File apne aap sahi jagah jayegi:
-
-| APK size | Kahan jayegi |
-|----------|-------------|
-| ≤ 25 MB | GitHub (`storefiles` repo ke Releases) |
-| > 25 MB | Backblaze B2 |
+**Releases → Naya release** → signed APK file chuno. Har supported APK
+(**maximum 50 MB**) GitHub `storefiles` Releases par secure Worker upload se
+jata hai. Upload me live byte progress dikhega; connection temporary drop ho
+to same APK ko phir select karke retry karna safe hai.
 
 Version name (`1.0.0`) + badhta hua version code (`1`, `2`, `3`...) +
-"What's new" likho → **Release banao** → **Submit for review**.
+"What's new" likho → **Upload & create release** → **Submit for review**.
 
 ## 5. Manual review
 Har naya APK pehle admin review se guzrega (Play Store jaisa):

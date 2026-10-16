@@ -89,7 +89,7 @@ export default function StoreAppLanding() {
 
         <section className="mt-16 rounded-[28px] bg-gradient-to-br from-emerald-500/20 via-teal-500/10 to-transparent p-8 text-center ring-1 ring-emerald-400/20">
           <h2 className="font-display text-2xl font-bold text-white sm:text-3xl">Are you a developer? Publish your app</h2>
-          <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-neutral-300">Upload your APK from the Developer Console — up to 25 MB on GitHub, larger files on Backblaze. After review, your app is live for everyone.</p>
+          <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-neutral-300">Upload your APK from the Developer Console — up to 50 MB on GitHub storefiles with live progress. After review, your app is live for everyone.</p>
           <a href={SITE_URLS.console} className="mt-5 inline-block rounded-full bg-emerald-500 px-7 py-3 font-display font-bold text-white shadow-xl shadow-emerald-500/25 hover:bg-emerald-400">Open the Developer Console</a>
         </section>
       </main>

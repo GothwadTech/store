@@ -44,8 +44,8 @@ stays empty and the app shows its backend status.
 ## 💾 Storage ke pakke niyam
 
 - **Images** (icon/screenshots/logo) → **ImgBB** sirf
-- **APK ≤ 25 MB** → **GitHub** repo `GothwadTech/storefiles` (Releases)
-- **APK > 25 MB** → **Backblaze B2**
+- **APK ≤ 50 MB** → **GitHub** repo `GothwadTech/storefiles` (Releases)
+- APKs over 50 MB are rejected before upload for a reliable, single-provider flow.
 - **Supabase** → sirf database (500 MB metadata). Storage bucket **nahi** banta.
 
 © 2026 Gothwad Tech · Made in India 🇮🇳

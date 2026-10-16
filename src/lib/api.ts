@@ -9,32 +9,116 @@ import type { AppRelease, Category, Developer, GothwadUser, ReportItem, Review, 
 export class ApiError extends Error {
   status: number;
   code: string;
+  retryable: boolean;
   constructor(status: number, code: string, message: string) {
     super(message);
+    this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.retryable = status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
   }
+}
+
+const RETRYABLE_STATUS = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
+const sleep = (milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+
+function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
+function parseError(status: number, data: unknown, fallback: string): ApiError {
+  const body = (data ?? {}) as { error?: string; message?: string };
+  return new ApiError(status, body.error ?? 'request_failed', body.message ?? fallback);
+}
+
+async function responseData(res: Response): Promise<unknown> {
+  const text = await res.text();
+  try { return text ? JSON.parse(text) : null; } catch { return null; }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await fetch(apiUrl(path), {
       ...init,
       credentials: 'include',
       headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init.headers ?? {}) },
     });
   } catch {
-    throw new ApiError(0, 'network', 'Could not reach the Store API');
+    throw new ApiError(0, 'network', 'Could not reach the Store API. Check your connection and try again.');
   }
-  const text = await res.text();
-  let data: unknown = null;
-  try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
-  if (!res.ok) {
-    const d = (data ?? {}) as { error?: string; message?: string };
-    throw new ApiError(res.status, d.error ?? 'request_failed', d.message ?? `Request failed (${res.status})`);
-  }
+  const data = await responseData(res);
+  if (!res.ok) throw parseError(res.status, data, `Request failed (${res.status})`);
   return data as T;
+}
+
+interface XhrUploadOptions {
+  timeoutMs?: number;
+  onProgress?: (fraction: number) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * XMLHttpRequest is deliberate here: fetch still does not expose request-body
+ * progress in browsers. APK/image uploads now show actual bytes sent instead
+ * of sitting at "0%" until the server returns.
+ */
+function xhrJson(
+  method: 'POST' | 'PUT',
+  url: string,
+  body: BodyInit | null,
+  options: XhrUploadOptions = {},
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let finished = false;
+    const finish = (callback: () => void) => {
+      if (finished) return;
+      finished = true;
+      options.signal?.removeEventListener('abort', abort);
+      callback();
+    };
+    const abort = () => {
+      try { xhr.abort(); } catch { /* no-op */ }
+      finish(() => reject(new ApiError(0, 'aborted', 'Upload cancelled.')));
+    };
+
+    xhr.open(method, url);
+    xhr.withCredentials = true;
+    xhr.timeout = options.timeoutMs ?? 180_000;
+    for (const [header, value] of Object.entries(authHeaders())) xhr.setRequestHeader(header, value);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) options.onProgress?.(Math.min(1, event.loaded / event.total));
+    };
+    xhr.onload = () => {
+      let data: unknown = null;
+      try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { /* handled below */ }
+      if (xhr.status >= 200 && xhr.status < 300) finish(() => resolve(data));
+      else finish(() => reject(parseError(xhr.status, data, `Upload failed (${xhr.status})`)));
+    };
+    xhr.onerror = () => finish(() => reject(new ApiError(0, 'network', 'The upload lost its network connection. Please try again.')));
+    xhr.ontimeout = () => finish(() => reject(new ApiError(408, 'timeout', 'The upload took too long. Check your connection and try again.')));
+    xhr.onabort = () => finish(() => reject(new ApiError(0, 'aborted', 'Upload cancelled.')));
+    options.signal?.addEventListener('abort', abort, { once: true });
+    xhr.send(body as XMLHttpRequestBodyInit | null);
+  });
+}
+
+async function retryUpload<T>(work: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await work();
+    } catch (error) {
+      lastError = error;
+      const status = error instanceof ApiError ? error.status : 0;
+      if (!RETRYABLE_STATUS.has(status) || attempt === attempts - 1) throw error;
+      // Small bounded backoff: it covers transient ImgBB/Worker hiccups without
+      // trapping a developer in a spinner for minutes.
+      await sleep(500 * (attempt + 1));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new ApiError(0, 'upload_failed', 'Upload failed.');
 }
 
 export interface SessionInfo {
@@ -160,7 +244,7 @@ export interface ApkManifestInfo {
 }
 
 export interface UploadedApk {
-  provider: 'github' | 'b2';
+  provider: 'github';
   url: string;
   key: string;
   sizeBytes: number;
@@ -168,69 +252,66 @@ export interface UploadedApk {
   manifest?: ApkManifestInfo;
 }
 
-/** Image → Worker → ImgBB. Compressed Blob bhej sakte ho (compressImage ke baad). */
-export async function uploadImage(image: Blob, fileName = 'image.webp'): Promise<string> {
-  const form = new FormData();
-  form.append('image', image, fileName);
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}/uploads/image`, { method: 'POST', credentials: 'include', headers: authHeaders(), body: form });
-  } catch {
-    throw new ApiError(0, 'network', 'Could not reach the Store API');
-  }
-  const data = (await res.json().catch(() => null)) as { url?: string; error?: string; message?: string } | null;
-  if (!res.ok || !data?.url) throw new ApiError(res.status, data?.error ?? 'upload_failed', data?.message ?? 'Image upload failed');
-  return data.url;
+export interface UploadCallbacks {
+  onProgress?: (fraction: number) => void;
+  signal?: AbortSignal;
+}
+
+/** Image → Worker → ImgBB. It is retried for temporary network/provider errors. */
+export async function uploadImage(
+  image: Blob,
+  fileName = 'image.webp',
+  callbacks: UploadCallbacks = {},
+): Promise<string> {
+  const result = await retryUpload(async () => {
+    const form = new FormData();
+    // The pipeline produces WebP. A matching filename avoids provider-side MIME
+    // confusion when a converted PNG/JPEG kept its original extension.
+    form.append('image', image, fileName.replace(/\.[^.]+$/, '') + '.webp');
+    return xhrJson('POST', apiUrl('/uploads/image'), form, {
+      ...callbacks,
+      timeoutMs: 90_000,
+    }) as Promise<{ url?: string; error?: string; message?: string }>;
+  });
+  if (!result?.url) throw new ApiError(502, result?.error ?? 'upload_failed', result?.message ?? 'Image upload failed. Please try again.');
+  callbacks.onProgress?.(1);
+  return result.url;
 }
 
 /** APK store kiye bina manifest auto-read (console form auto-fill). */
-export async function inspectApk(file: File): Promise<{ manifest: ApkManifestInfo; sizeBytes: number; sha256: string }> {
+export async function inspectApk(file: File, signal?: AbortSignal): Promise<{ manifest: ApkManifestInfo; sizeBytes: number; sha256: string }> {
   const form = new FormData();
   form.append('file', file, file.name);
-  const res = await fetch(`${API_BASE}/uploads/apk-inspect`, { method: 'POST', credentials: 'include', headers: authHeaders(), body: form });
-  const data = (await res.json().catch(() => null)) as { manifest?: ApkManifestInfo; sizeBytes?: number; sha256?: string; error?: string; message?: string } | null;
-  if (!res.ok || !data?.manifest) throw new ApiError(res.status, data?.error ?? 'inspect_failed', data?.message ?? 'APK inspection failed');
+  const data = await xhrJson('POST', apiUrl('/uploads/apk-inspect'), form, { timeoutMs: 120_000, signal }) as {
+    manifest?: ApkManifestInfo; sizeBytes?: number; sha256?: string; error?: string; message?: string;
+  };
+  if (!data?.manifest) throw new ApiError(502, data?.error ?? 'inspect_failed', data?.message ?? 'APK inspection failed');
   return { manifest: data.manifest, sizeBytes: data.sizeBytes ?? file.size, sha256: data.sha256 ?? '' };
 }
 
 /**
- * Poora APK upload flow (pakka rule):
- *  ≤25 MB → Worker se GitHub storefiles;  >25 MB → B2 presigned PUT (direct).
- * onProgress(0..1) dono raaston par best-effort milta hai.
+ * APK upload flow: every supported APK goes through the Worker to GitHub
+ * storefiles. XHR exposes actual upload bytes, and a bounded retry handles a
+ * temporary connection loss without silently leaving the UI at 0%.
  */
 export async function uploadApk(
   file: File,
   app: { packageName: string },
   versionCode: number,
-  onProgress?: (fraction: number) => void,
+  callbacks: UploadCallbacks = {},
 ): Promise<UploadedApk> {
-  const ticket = await request<{ provider: 'github' | 'b2'; mode: string; uploadUrl: string; publicUrl?: string; key?: string }>('/uploads/apk-ticket', {
-    method: 'POST',
-    body: JSON.stringify({ packageName: app.packageName, versionCode, fileName: file.name, sizeBytes: file.size, contentType: file.type || 'application/vnd.android.package-archive' }),
-  });
-
-  if (ticket.provider === 'b2') {
-    await new Promise<void>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('PUT', ticket.uploadUrl);
-      xhr.setRequestHeader('Content-Type', file.type || 'application/vnd.android.package-archive');
-      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
-      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new ApiError(xhr.status, 'b2_upload_failed', 'Backblaze B2 upload failed')));
-      xhr.onerror = () => reject(new ApiError(0, 'network', 'Backblaze B2 upload failed'));
-      xhr.send(file);
-    });
-    onProgress?.(1);
-    return { provider: 'b2', url: ticket.publicUrl ?? ticket.uploadUrl.split('?')[0], key: ticket.key ?? '', sizeBytes: file.size };
-  }
-
-  // GitHub raasta: Worker khud storefiles Releases me daalta hai.
-  const form = new FormData();
-  form.append('file', file, file.name);
-  form.append('packageName', app.packageName);
-  form.append('versionCode', String(versionCode));
-  const res = await fetch(`${API_BASE}/uploads/apk`, { method: 'POST', credentials: 'include', headers: authHeaders(), body: form });
-  const data = (await res.json().catch(() => null)) as (UploadedApk & { error?: string; message?: string }) | null;
-  if (!res.ok || !data?.url) throw new ApiError(res.status, data?.error ?? 'upload_failed', data?.message ?? 'APK upload failed');
-  onProgress?.(1);
-  return { provider: 'github', url: data.url, key: data.key, sizeBytes: data.sizeBytes ?? file.size, sha256: data.sha256, manifest: data.manifest };
+  callbacks.onProgress?.(0);
+  const result = await retryUpload(async () => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    form.append('packageName', app.packageName);
+    form.append('versionCode', String(versionCode));
+    return xhrJson('POST', apiUrl('/uploads/apk'), form, {
+      ...callbacks,
+      timeoutMs: 10 * 60_000,
+    }) as Promise<UploadedApk & { error?: string; message?: string }>;
+  }, 2);
+  if (!result?.url) throw new ApiError(502, result?.error ?? 'upload_failed', result?.message ?? 'APK upload failed. Please try again.');
+  callbacks.onProgress?.(1);
+  return { provider: 'github', url: result.url, key: result.key, sizeBytes: result.sizeBytes ?? file.size, sha256: result.sha256, manifest: result.manifest };
 }

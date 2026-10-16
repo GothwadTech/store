@@ -1,7 +1,7 @@
 // Gothwad Store - shared types (Web Store + Console + Admin + Android API ek hi shape)
 export type AppStatus = 'draft' | 'in_review' | 'published' | 'unlisted' | 'suspended';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
-export type StorageProvider = 'github' | 'b2' | 'imgbb';
+export type StorageProvider = 'github' | 'imgbb';
 
 export interface Developer {
   id: string;
@@ -21,8 +21,8 @@ export interface AppRelease {
   appId: string;
   versionCode: number;
   versionName: string;
-  /** APK kahan hai - rule: <=25MB github (storefiles repo), >25MB Backblaze B2 */
-  apkProvider: Extract<StorageProvider, 'github' | 'b2'>;
+  /** APK hamesha GothwadTech/storefiles GitHub Releases par hota hai. */
+  apkProvider: Extract<StorageProvider, 'github'>;
   apkKey: string;
   apkUrl: string;
   apkSizeBytes: number;

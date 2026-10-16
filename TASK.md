@@ -1,6 +1,6 @@
 # 📋 TASK.md — Gothwad Store live status
 
-**Last updated:** 2026-10-16 (Preview-only demo; production hostname gate) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
+**Last updated:** 2026-10-16 (console reliability pass: GitHub-only APK uploads, 50 MB cap, guided publishing) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
 
 ## ✅ Ho gaya (Session 1 — 2026-10-16)
 
@@ -10,7 +10,7 @@
       app detail (screenshots/reviews/wishlist/download), library, developer page
 - [x] **Developer Console** (`console.*`) — onboarding, dashboard, create app
       (package unique check), listing editor (ImgBB images), APK release upload
-      (≤25MB → GitHub / >25MB → B2 rule auto), submit-for-review, stats, review reply
+      (GitHub storefiles, ≤50MB, live byte progress), submit-for-review, stats, review reply
 - [x] **Admin** (`storeadmin.*`) — manual review queue (approve/reject+note),
       all-apps suspend/restore, user reports. Sirf `ADMIN_USERNAMES` wale
 - [x] **StoreApp landing** (`storeapp.*`) — Store Android app download page + QR
@@ -18,8 +18,7 @@
 - [x] Auth — "Sign in with Gothwad" PKCE flow + Worker `/api/me` (cookie/Bearer);
       optional local/preview demo account is host-gated off all production domains
 - [x] Worker `store` (`worker/`) — health, me, OAuth exchange, public store API,
-      download counter+redirect, ImgBB image upload, APK ticket
-      (GitHub worker-upload / B2 presigned PUT), GitHub Releases upload
+      download counter+redirect, resilient ImgBB image upload, GitHub Releases APK upload (≤50MB)
 - [x] Supabase SQL `sql/01_StoreSchema.sql` — 12 tables + RLS + categories
       (Storage bucket NAHI banta — pakka faisla)
 - [x] `npm run build` + worker typecheck saaf
@@ -48,7 +47,7 @@
       Production backend unconfigured/unavailable ho to empty catalog + clear
       status notice dikhta hai; local/preview retains sample data and demo-only
       local persistence. Console ke image uploads `/api/uploads/image` (ImgBB) se, APK flow
-      `apk-ticket`/`apk` (≤25MB GitHub, >25MB B2 presigned direct, progress
+      `/apk` (GitHub-only, ≤50MB, progress
       ke saath) se jud gaya
 - [x] **APK manifest auto-read:** `worker/src/apk.ts` — ZIP + binary
       AndroidManifest.xml se package/versionCode/versionName/min/target SDK/
@@ -83,7 +82,7 @@
       the apex and every `*.gothwadtech.com` host start empty and use Gothwad auth only.
 - [x] Production backend unconfigured/unavailable stays empty/API-only; write
       actions cannot silently fall back to local state. Preview demo writes stay
-      local and do not upload APKs or alter the existing B2 flow.
+      local and do not upload APKs or alter the live GitHub upload flow.
 - [x] Real API statistics/download behavior in production and explicit backend
       status notices; only the local demo uses labeled illustrative stats.
       Sample APK URLs stay blank.
@@ -104,7 +103,7 @@
       with stale demo storage and verifies no demo UI on the first paint; the
       current regression test checks the synchronous guards statically.
 - [ ] After owner-only service setup, smoke-test Accounts cookie/OAuth, live
-      catalog, ImgBB, GitHub uploads, and the existing B2 upload path end-to-end.
+      catalog, ImgBB, and GitHub uploads end-to-end.
 
 ## 🔜 Agla (owner ke human steps pehle — docs/SETUP.md)
 
@@ -113,7 +112,7 @@
       chaaro `/auth/callback` redirect URIs, admin wala
       `https://storeadmin.gothwadtech.com/auth/callback` sahit)
 - [ ] GitHub repo `GothwadTech/storefiles` (owner bana raha hai) + PAT
-- [ ] Backblaze B2 bucket + key · ImgBB API key
+- [ ] ImgBB API key · GitHub storefiles fine-grained token
 - [ ] Cloudflare: Pages project (4 custom domains) + Worker `store` (4 routes)
 - [ ] Live test: console upload → admin approve → store download → phone install
 - [ ] Auth hardening: asli Accounts cookie SSO chaaro subdomains par test

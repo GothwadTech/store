@@ -30,7 +30,7 @@ export interface NewReleaseInput {
   permissions: string[];
   apkName: string;
   apkUrl?: string;
-  apkProvider?: 'github' | 'b2';
+  apkProvider?: 'github';
   apkKey?: string;
   apkSha256?: string;
   manifest?: ApkManifestInfo | null;
@@ -77,11 +77,11 @@ const seedReleases: AppRelease[] = SEED_APPS.map((app, index) => ({
   appId: app.id,
   versionCode: 10 + index,
   versionName: `1.${index}.0`,
-  apkProvider: index % 3 === 2 ? 'b2' : 'github',
+  apkProvider: 'github',
   apkKey: `${app.packageName}/${app.packageName}-10${index}.apk`,
   // Sample listings have no real APK behind these records.
   apkUrl: '',
-  apkSizeBytes: (index % 3 === 2 ? 86 : 14 + index) * 1024 * 1024,
+  apkSizeBytes: (14 + (index % 12)) * 1024 * 1024,
   minSdk: 24,
   permissions: ['android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE'],
   changelog: 'Performance improvements and bug fixes.',

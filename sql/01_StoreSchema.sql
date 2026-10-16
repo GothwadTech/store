@@ -9,7 +9,7 @@
 --    create table if not exists · add column if not exists ·
 --    drop policy if exists · insert ... on conflict do update.
 --
--- Supabase yahan SIRF database hai - files ImgBB/GitHub/Backblaze par hain,
+-- Supabase yahan SIRF database hai - images ImgBB aur APKs GitHub par hain,
 -- isiliye Storage bucket yahan NAHI banta.
 -- ═══════════════════════════════════════════════════════════════════
 
@@ -57,12 +57,27 @@ create table if not exists public.apps (
   updated_at timestamptz not null default now()
 );
 
+-- Older installs may have been created before these defaults existed. Make the
+-- draft-safe columns explicit before the Worker starts inserting/updating them.
+update public.apps set icon_url = '' where icon_url is null;
+update public.apps set short_desc = '' where short_desc is null;
+update public.apps set full_desc = '' where full_desc is null;
+update public.apps set support_email = '' where support_email is null;
+alter table public.apps alter column icon_url set default '';
+alter table public.apps alter column short_desc set default '';
+alter table public.apps alter column full_desc set default '';
+alter table public.apps alter column support_email set default '';
+alter table public.apps alter column icon_url set not null;
+alter table public.apps alter column short_desc set not null;
+alter table public.apps alter column full_desc set not null;
+alter table public.apps alter column support_email set not null;
+
 create table if not exists public.app_releases (
   id text primary key,
   app_id text not null references public.apps(id) on delete cascade,
   version_code integer not null,
   version_name text not null,
-  apk_provider text not null check (apk_provider in ('github','b2')),  -- <=25MB github, >25MB b2
+  apk_provider text not null check (apk_provider in ('github')),       -- GitHub storefiles (up to 50 MB)
   apk_key text not null default '',
   apk_url text not null default '',
   apk_size_bytes bigint not null default 0,

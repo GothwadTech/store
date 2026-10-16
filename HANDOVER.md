@@ -10,10 +10,10 @@
 > [`TASK.md`](TASK.md) (live checklist) → [`sql/README.md`](sql/README.md)
 > (before touching SQL) → [`docs/SETUP.md`](docs/SETUP.md) (deployment).
 >
-> **Last updated:** 2026-10-16 (Session 3 — local/preview demo retained and
-> synchronously gated off production domains; Worker download/status safeguards
-> retained). Sessions 1 and 2 form the repository baseline; the current task
-> branch is tracked by Arena.
+> **Last updated:** 2026-10-16 (Session 4 — console publishing reliability:
+> ImgBB preflight/retries, GitHub-only APK uploads with live progress, 50 MB cap,
+> 23502 listing-save fix, and guided setup flow). Sessions 1–3 form the repository
+> baseline; the current task branch is tracked by Arena.
 
 ---
 
@@ -70,18 +70,17 @@ them away:
    metadata only (500 MB free tier is plenty for that). The service-role key
    lives **only** as a Worker secret; the frontend never talks to Supabase
    directly (all traffic goes through the Worker).
-4. **File storage — exactly three providers, fixed routing:**
+4. **File storage — two-provider, reliable routing:**
    - **Images** (icons, screenshots, feature graphics, logos) → **ImgBB only**.
-     Because ImgBB has no on-the-fly transforms, images are resized/compressed
-     **in the browser before upload** (`compressImage()` in `src/lib/storage.ts`).
-     Cloudinary was considered and explicitly rejected by the owner.
-   - **APK ≤ 25 MB** → **GitHub** repository **`GothwadTech/storefiles`**
+     The console validates, normalizes, and browser-compresses them before upload
+     (`prepareImage()` in `src/lib/storage.ts`), with retries for transient ImgBB
+     failures. Cloudinary was considered and explicitly rejected by the owner.
+   - **APK ≤ 50 MB** → **GitHub** repository **`GothwadTech/storefiles`**
      (slug exactly `storefiles`; Releases, one tag per `package@versionCode`).
-   - **APK > 25 MB** → **Backblaze B2** (S3-compatible, private bucket,
-     Worker-generated presigned PUT for upload). The "B2 vs GitHub" decision
-     must be made from the APK byte size — `apkProviderForSize()` in
-     `src/lib/storage.ts` and the same constant in `worker/src/index.ts`.
-     Keep the two in sync.
+     The browser shows actual byte progress through the Worker. APKs over 50 MB
+     are rejected before upload so the one supported route stays reliable.
+   - **Backblaze B2 is removed.** Do not reintroduce direct B2/presigned upload
+     code, configuration, or secrets without an explicit new owner decision.
    - Cloudflare R2 is a *future* option only (it requires a card the owner
      does not have yet). Do not wire it in now.
 5. **Manual review is mandatory for every APK.** Lifecycle:
@@ -107,7 +106,7 @@ them away:
    that identity and its controls from rendering on `gothwadtech.com` domains.
 9. **Secrets never in git/code.** `SUPABASE_SERVICE_ROLE_KEY`,
    `IMGBB_API_KEY`, `GITHUB_FILES_TOKEN` (fine-grained, storefiles repo only),
-   `B2_KEY_ID`, `B2_APP_KEY` — Worker secrets (dashboard or `wrangler secret
+   — Worker secrets (dashboard or `wrangler secret
    put`) or `worker/.dev.vars` locally (git-ignored). Public values live in
    `worker/wrangler.toml` `[vars]` and root `.env.example` (Vite `VITE_*`).
 
@@ -140,7 +139,7 @@ store/
 │   │   ├── config.ts      domains, mode detection, production/demo host gate
 │   │   ├── api.ts         Worker API client (store/dev/admin/uploads, upload flows)
 │   │   ├── auth.ts        Gothwad sign-in (PKCE), /api/me, preview demo identity
-│   │   ├── storage.ts     provider routing (≤25MB GitHub / >25MB B2), image compression
+│   │   ├── storage.ts     GitHub APK limit (≤50MB), image preparation/compression
 │   │   ├── router.ts      tiny path router (no react-router dependency)
 │   │   └── AppContext.tsx GLOBAL STATE: apps/releases/reviews/submissions/…
 │   ├── shared/ui.tsx      Logo, AppIcon, Stars, StatusBadge, AppCard/Row, SignInPrompt
@@ -159,8 +158,7 @@ store/
 
 **Stack (same as the Mail repo):** Vite + React 19 + TypeScript +
 Tailwind CSS 4 (`@tailwindcss/vite`) + `lucide-react`. Worker is plain
-TypeScript on Workers APIs (fetch-based Supabase REST, hand-rolled SigV4
-for Backblaze B2). No database or HTTP libraries.
+TypeScript on Workers APIs (fetch-based Supabase REST). No database or HTTP libraries.
 
 ---
 
@@ -195,15 +193,15 @@ Indus/Play-Console-inspired professional layout:
   reviews), rejected-submission alert, professional **apps table**
   (app/category/live version/status/downloads/rating)
 - **Create app:** package-name format validation + taken/available live
-  feedback, type + category, "Before you create" guidance panel.
+  feedback, type + category, inline failure state, and guided next-step panel.
   Package name is immutable by design.
 - **App detail** with underlined tabs (`/apps/:id`, `/apps/:id/releases`,
   `/apps/:id/reviews`):
   - *Store listing:* details form, graphics (icon upload, screenshot grid with
     add/remove — browser-compressed; local demo stores data URLs, live mode uses
     ImgBB), contact & privacy, **sticky save bar** with discard
-  - *Releases:* APK drop-zone that shows the GitHub/B2 rule from file size,
-    version name/code + release notes, **release history table**, submit-for-review;
+  - *Releases:* GitHub-only APK drop-zone (≤50MB), background preflight, live byte
+    progress, version name/code + release notes, **release history table**, submit-for-review;
     preview accepts a local simulated release without uploading APK bytes
   - *Reviews:* per-app reviews with developer reply
   - Unpublish/republish actions; reviewer rejection note banner
@@ -257,15 +255,14 @@ Base: each production site proxies/serves the same Worker at `/api/*`.
 
 | Endpoint | Status |
 |----------|--------|
-| `GET /api/health` | ✅ config snapshot (supabase/imgbb/github/b2/accounts) |
+| `GET /api/health` | ✅ config snapshot (supabase/imgbb/github/accounts) |
 | `GET /api/me` | ✅ verifies Accounts cookie or Bearer via Accounts (`/api/auth/me`, `/oauth/userinfo`); attaches developer row + `isAdmin` when DB is configured |
 | `POST /api/auth/exchange` | ✅ OAuth code → tokens (PKCE verifier) → user |
 | `POST /api/auth/signout` | ✅ (stateless ack; cookies belong to Accounts) |
 | `GET /api/store/categories`, `/api/store/home`, `/api/store/apps` (kind/category/q filters), `/api/store/apps/:packageName` (listing + screenshots + live release + reviews) | ✅ when Supabase configured; otherwise returns an empty `source: "unconfigured"` payload (no fixture data) |
-| `GET /api/download/:releaseId` | ✅ records a `downloads` row, 302-redirects to the stored GitHub/B2 URL |
+| `GET /api/download/:releaseId` | ✅ records a `downloads` row, 302-redirects to the stored GitHub URL |
 | `POST /api/uploads/image` | ✅ proxies to ImgBB with the server-side key, returns `{provider, url, deleteUrl}` |
-| `POST /api/uploads/apk-ticket` | ✅ size rule: ≤25 MB → GitHub worker-upload mode; >25 MB → B2 presigned PUT (SigV4, 1 h) + public URL |
-| `POST /api/uploads/apk` | ✅ uploads ≤25 MB APK to GitHub `storefiles` Releases (`package@versionCode` tag), returns CDN URL |
+| `POST /api/uploads/apk` | ✅ uploads APKs up to 50 MB to GitHub `storefiles` Releases (`package@versionCode` tag), returns CDN URL + manifest/hash |
 | `POST /api/store/apps/:id/reviews|wishlist|report|library`, `GET /api/store/library|wishlist` | ✅ Session 2: login-ke-baad wale user actions (ek user = ek review, rating Worker par recompute) |
 | `/api/dev/*` (register, apps CRUD + listing/screenshots, releases, submit, stats, reviews+reply) | ✅ Session 2: `sql/01` tables par, ownership + package-uniqueness + version-code-monotonic rules ke saath |
 | `/api/admin/*` (queue, approve/reject — note reject par mandatory, suspend/restore, feature, reports resolve) | ✅ Session 2: approve par ek hi live release + app published; purana live version naye review ke dauran chalta rehta hai |
@@ -278,7 +275,7 @@ messages in English.
 
 ### 4.7 Database (`sql/01_StoreSchema.sql`)
 12 tables — `developers`, `categories` (seeded, 12 rows), `apps`,
-`app_releases` (provider constrained to `github|b2`), `app_screenshots`,
+`app_releases` (new releases constrained by the Worker to `github`), `app_screenshots`,
 `reviews` (one per user per app), `wishlists`, `downloads`, `library`,
 `review_submissions`, `reports`, `featured` — plus indexes. RLS is enabled on
 every table; public read is limited to published apps / screenshots /
@@ -298,10 +295,8 @@ the service-role key (which bypasses RLS). **No storage buckets.**
   liye field naam wahi rakhe hain); raw `apk_url` browser ko kabhi nahi
   jata, hamesha `/api/download/:releaseId` milta hai.
 - **Uploads asal me jude:** console images → `/api/uploads/image` (ImgBB,
-  browser-compressed), APK → ticket rule (≤25 MB Worker→GitHub, >25 MB B2
-  presigned direct PUT, progress ke saath), phir release CRUD se persist.
-  B2 upload ke baad Worker URL ko verify nahi karta — release create par
-  developer wahi `publicUrl` bhejta hai.
+  browser-compressed with validation/retries), APK → GitHub Worker upload (≤50 MB)
+  with byte progress, then release CRUD persists the returned URL.
 - **APK manifest:** `worker/src/apk.ts` best-effort ZIP+binary-XML parser
   (package/version/SDK/permissions) + SHA-256; fail ho to manual form fields
   fallback hain, package mismatch Worker par 400 hai.
@@ -309,7 +304,7 @@ the service-role key (which bypasses RLS). **No storage buckets.**
 - **Verify kiya gaya:** `npm run build` + worker typecheck pass; mock
   Supabase/Accounts ke against poora Worker E2E aur synthetic APK
   (stored+deflated dono) se manifest parser test pass. Asli Supabase/GitHub/
-  B2/ImgBB ke against live test owner ke §6.1 steps ke baad hi hoga.
+  ImgBB ke against live test owner ke §6.1 steps ke baad hi hoga.
 
 ---
 
@@ -352,12 +347,11 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
    and run `sql/01_StoreSchema.sql`.
 2. Register the `gothwad-store` client in **Accounts'** `ecosystem_apps`
    (redirect URIs for all four `/auth/callback`s + localhost).
-3. Create keys: ImgBB API key; GitHub fine-grained PAT for `storefiles`;
-   Backblaze B2 private bucket + scoped key.
+3. Create keys: ImgBB API key; GitHub fine-grained PAT for `storefiles`.
 4. Cloudflare Pages: connect this repo (`npm run build` → `dist`), attach
    all four custom domains.
-5. Worker `store`: fill `SUPABASE_URL` + B2 vars in `worker/wrangler.toml`,
-   set the five secrets, add `/api/*` routes on all four domains, deploy.
+5. Worker `store`: fill `SUPABASE_URL` in `worker/wrangler.toml`,
+   set the three secrets, add `/api/*` routes on all four domains, deploy.
 6. Verify `/api/health` shows every `configured: true`, then run the first
    live loop (console upload → admin approve → store download → install).
 
@@ -382,8 +376,7 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
    not rename fields casually).~~ (done; local sample fallback is intentionally
    retained only on non-production preview hosts.)
 3. ~~**Real uploads:** wire console image uploads to `POST /api/uploads/image`
-   (ImgBB) and APK flow to `apk-ticket`/`apk` (GitHub ≤25 MB via Worker;
-   B2 presigned direct upload >25 MB) with progress; persist returned URLs
+   (ImgBB) and APK flow to `/apk` (GitHub ≤50 MB via Worker) with live progress; persist returned URLs
    through the CRUD endpoints from step 1.
 4. ~~**APK manifest parsing** in the Worker (`worker/src/apk.ts`):~~ (ban gaya hai —)
    best-effort extract package name, versionCode/name, min/target SDK and
@@ -409,8 +402,8 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
   storage / 2 active projects per org / 7-day inactivity pause; ImgBB is
   unlimited-ish but has no transforms or SLA (browser-side compression is
   load-bearing); GitHub Releases is a distribution mirror, not a sole copy
-  (SHA-256 is stored per release; keep a B2 backup of every APK); B2's free
-  allowance is 10 GB. The Worker must keep absorbing provider failures with
+  (SHA-256 is stored per release; keep an independent backup outside this upload path);
+  The Worker must keep absorbing provider failures with
   clear English errors rather than crashing pages.
 - **Seed listings are demo fixtures, not production content.** They remain
   available only on localhost/non-production previews. Production host gating

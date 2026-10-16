@@ -6,8 +6,8 @@
 // Pakke niyam (PLAN.md):
 //  · Supabase = Store ka APNA project, SIRF database (Storage bilkul nahi)
 //  · Images  -> ImgBB            (IMGBB_API_KEY)
-//  · APK <=25MB -> GitHub storefiles repo   (GITHUB_FILES_TOKEN)
-//  · APK  >25MB -> Backblaze B2 (S3 API)     (B2_KEY_ID/B2_APP_KEY)
+//  · APK <=50MB -> GitHub storefiles repo   (GITHUB_FILES_TOKEN)
+//  · Larger APKs are rejected before upload for a reliable Worker path.
 //  · Login   -> Gothwad Accounts OAuth/cookie (khud ka password system NAHI)
 //  · SERVICE ROLE KEY sirf yahi rahegi, frontend me kabhi nahi
 //  · Har APK manual review ke baad hi live hoga (draft → in_review → published)
@@ -28,18 +28,16 @@ interface Env {
   ADMIN_USERNAMES: string;
   GITHUB_FILES_OWNER: string;
   GITHUB_FILES_REPO: string;
-  B2_S3_ENDPOINT: string;
-  B2_BUCKET: string;
-  B2_PUBLIC_BASE: string;
   ALLOWED_ORIGINS: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   IMGBB_API_KEY?: string;
   GITHUB_FILES_TOKEN?: string;
-  B2_KEY_ID?: string;
-  B2_APP_KEY?: string;
 }
 
-const APK_GITHUB_LIMIT = 25 * 1024 * 1024; // src/lib/storage.ts ke saath sync rakho
+const MAX_APK_SIZE = 50 * 1024 * 1024; // Keep multipart + Worker memory safely below platform request limits.
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
+const APK_PACKAGE_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), {
@@ -101,7 +99,20 @@ async function sbWrite(env: Env, path: string, method: string, body?: unknown, p
   try { const parsed = text ? JSON.parse(text) : null; if (Array.isArray(parsed)) rows = parsed; else if (parsed && typeof parsed === 'object') rows = [parsed]; } catch { /* ignore */ }
   return { ok: r.ok, status: r.status, rows, detail: text.slice(0, 300) };
 }
-const dbFail = (detail: string) => err('database_error', `Database request failed. ${detail}`.trim(), 502);
+// PostgREST's raw detail can contain an entire row (including a user's support
+// email and unpublished listing data). Keep that useful detail in Worker logs,
+// but never send it to the browser.
+const dbFail = (detail: string) => {
+  console.error('Store database request failed:', detail);
+  const missingRequiredValue = /"code"\s*:\s*"?23502"?|not-null constraint/i.test(detail);
+  return err(
+    'database_error',
+    missingRequiredValue
+      ? 'The Store database rejected a required listing field. Please retry; if it continues, contact Gothwad Store support.'
+      : 'The Store database could not save this change. Please try again in a moment.',
+    502,
+  );
+};
 
 // ── Gothwad Accounts session verify ─────────────────────────────────
 interface GothwadUser { id: string; username: string; name: string; email: string; picture?: string }
@@ -274,36 +285,17 @@ async function readBody(req: Request): Promise<Row> {
   try { const b = await req.json(); return (b && typeof b === 'object' ? b : {}) as Row; } catch { return {}; }
 }
 
-// ── Backblaze B2 (S3 SigV4 presigned PUT) ───────────────────────────
-async function hmac(key: ArrayBuffer | Uint8Array, msg: string): Promise<ArrayBuffer> {
-  const k = await crypto.subtle.importKey('raw', key as ArrayBuffer, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return crypto.subtle.sign('HMAC', k, new TextEncoder().encode(msg));
+function validApkName(name: string): boolean {
+  return /\.apk$/i.test(name) && !/[\\/\0]/.test(name);
 }
-const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-
-async function b2PresignedPut(env: Env, key: string, expiresSec = 3600): Promise<string> {
-  const endpoint = env.B2_S3_ENDPOINT.replace(/\/$/, '');
-  const host = new URL(endpoint).host;
-  const region = endpoint.match(/s3\.([a-z0-9-]+)\.backblazeb2\.com/)?.[1] ?? 'us-west-004';
-  const now = new Date();
-  const amzDate = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-  const date = amzDate.slice(0, 8);
-  const scope = `${date}/${region}/s3/aws4_request`;
-  const encodedKey = key.split('/').map(encodeURIComponent).join('/');
-  const params = new URLSearchParams({
-    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-    'X-Amz-Credential': `${env.B2_KEY_ID}/${scope}`,
-    'X-Amz-Date': amzDate,
-    'X-Amz-Expires': String(expiresSec),
-    'X-Amz-SignedHeaders': 'host',
-  });
-  const canonical = ['PUT', `/${env.B2_BUCKET}/${encodedKey}`, params.toString(), `host:${host}\n`, 'host', 'UNSIGNED-PAYLOAD'].join('\n');
-  const canonicalHash = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical)));
-  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, canonicalHash].join('\n');
-  let k: ArrayBuffer | Uint8Array = new TextEncoder().encode('AWS4' + env.B2_APP_KEY);
-  k = await hmac(k, date); k = await hmac(k, region); k = await hmac(k, 's3'); k = await hmac(k, 'aws4_request');
-  const signature = hex(await hmac(k, stringToSign));
-  return `${endpoint}/${env.B2_BUCKET}/${encodedKey}?${params}&X-Amz-Signature=${signature}`;
+/** An upload must belong to a real developer/listing; auth alone is not enough. */
+async function ownsPackage(env: Env, user: GothwadUser, packageName: string): Promise<{ app: Row; developer: Row } | { error: Response }> {
+  const developer = await developerOf(env, user);
+  if (!developer) return { error: err('developer_required', 'Create a developer profile before uploading files', 403) };
+  const app = await findApp(env, packageName);
+  if (!app || str(app.package_name) !== packageName) return { error: err('not_found', 'Create this app listing before uploading its APK', 404) };
+  if (str(app.developer_id) !== str(developer.id)) return { error: err('forbidden', 'This app does not belong to your developer profile', 403) };
+  return { app, developer };
 }
 
 // ── GitHub storefiles upload (APK <=25MB - Worker khud karega) ─────
@@ -316,19 +308,35 @@ async function githubUploadApk(env: Env, packageName: string, versionCode: numbe
     'User-Agent': 'gothwad-store-worker',
   };
   const tag = `${packageName}@${versionCode}`;
-  let rel = await fetch(`${base}/releases/tags/${encodeURIComponent(tag)}`, { headers });
-  if (rel.status === 404) {
-    rel = await fetch(`${base}/releases`, {
+  let response = await fetch(`${base}/releases/tags/${encodeURIComponent(tag)}`, { headers });
+  if (response.status === 404) {
+    response = await fetch(`${base}/releases`, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ tag_name: tag, name: `${packageName} v${versionCode}`, body: 'Uploaded by Gothwad Store' }),
     });
   }
-  if (!rel.ok) throw new Error('GitHub release creation failed');
-  const release = (await rel.json()) as { upload_url: string };
+  if (!response.ok) throw new Error(`GitHub release setup failed (${response.status})`);
+  const release = (await response.json()) as {
+    id: number; upload_url: string; assets?: { id: number; name: string }[];
+  };
+
+  // Retrying after a browser/network timeout can reach an already-created
+  // GitHub release asset. Delete only the same-name unfinished asset first,
+  // then attach the current bytes. This makes the UI retry safe.
+  const duplicate = release.assets?.find((asset) => asset.name === fileName);
+  if (duplicate) {
+    const removed = await fetch(`${base}/releases/assets/${duplicate.id}`, { method: 'DELETE', headers });
+    if (!removed.ok && removed.status !== 404) throw new Error(`GitHub could not replace the previous upload (${removed.status})`);
+  }
+
   const uploadUrl = release.upload_url.replace('{?name,label}', `?name=${encodeURIComponent(fileName)}`);
-  const up = await fetch(uploadUrl, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/vnd.android.package-archive' }, body: bytes });
-  if (!up.ok) throw new Error('GitHub asset upload failed');
-  const asset = (await up.json()) as { browser_download_url: string };
+  const uploaded = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/vnd.android.package-archive' },
+    body: bytes,
+  });
+  if (!uploaded.ok) throw new Error(`GitHub asset upload failed (${uploaded.status})`);
+  const asset = (await uploaded.json()) as { browser_download_url: string };
   return asset.browser_download_url;
 }
 
@@ -351,7 +359,6 @@ export default {
             supabase: dbConfigured(env),
             imgbb: !!env.IMGBB_API_KEY,
             githubFiles: !!env.GITHUB_FILES_TOKEN,
-            backblazeB2: !!(env.B2_KEY_ID && env.B2_BUCKET),
             accounts: env.AUTH_HUB_URL,
           },
         }));
@@ -498,7 +505,7 @@ export default {
         return out(json({ app: bundle.apps[0], screenshots: bundle.apps[0]?.screenshots ?? [], liveRelease: live, releases: bundle.releases, reviews: bundle.reviews }));
       }
 
-      // Download: pehle count (IP+app+day dedupe), phir asal file (GitHub/B2) par redirect
+      // Download: pehle count (IP+app+day dedupe), phir GitHub release asset par redirect
       const dlMatch = path.match(/^\/api\/download\/(.+)$/);
       if (dlMatch) {
         if (!dbConfigured(env)) return out(err('unconfigured', 'The Store database is not configured yet; downloads are unavailable.', 503));
@@ -525,66 +532,77 @@ export default {
         return out(new Response(null, { status: 302, headers: { Location: str(rel.apk_url) } }));
       }
 
-      // ── Uploads (login zaroori; DB zaroori NAHI - files DB me nahi jate) ──
+      // ── Uploads (authenticated developer + configured DB required) ──
       if (path.startsWith('/api/uploads')) {
         const user = await verifyUser(req, env);
         if (!user) return out(err('unauthorized', 'Please sign in with Gothwad', 401));
+        if (!dbConfigured(env)) return out(err('supabase_not_configured', 'The Store database is not configured yet; uploads are unavailable.', 503));
+        const developer = await developerOf(env, user);
+        if (!developer) return out(err('developer_required', 'Create a developer profile before uploading files', 403));
 
         if (path === '/api/uploads/image' && req.method === 'POST') {
-          // Saari images ImgBB par. Browser pehle hi resize/compress karke bhejta hai.
-          if (!env.IMGBB_API_KEY) return out(err('imgbb_not_configured', 'IMGBB_API_KEY is not configured', 503));
+          if (!env.IMGBB_API_KEY) return out(err('imgbb_not_configured', 'Image hosting is not configured yet. Please try again later.', 503));
           const form = await req.formData();
           const image = form.get('image');
-          if (!image) return out(err('bad_request', 'An image file is required', 400));
-          const up = new FormData();
-          up.append('image', image);
-          type ImgbbResponse = { data?: { url: string; delete_url: string }; success?: boolean };
-          let d: ImgbbResponse | null = null;
-          try {
-            const r = await fetch(`https://api.imgbb.com/1/upload?key=${env.IMGBB_API_KEY}`, { method: 'POST', body: up });
-            d = (await r.json().catch(() => null)) as ImgbbResponse | null;
-          } catch { d = null; }
-          if (!d?.success || !d.data) return out(err('imgbb_failed', 'ImgBB upload failed. Please try again.', 502));
-          return out(json({ provider: 'imgbb', url: d.data.url, deleteUrl: d.data.delete_url }));
+          if (!image || typeof image === 'string') return out(err('bad_request', 'An image file is required', 400));
+          if (!IMAGE_TYPES.has(image.type.toLowerCase())) return out(err('unsupported_image', 'Choose a PNG, JPG, or WebP image.', 415));
+          if (!image.size) return out(err('bad_request', 'The image file is empty.', 400));
+          if (image.size > MAX_IMAGE_SIZE) return out(err('image_too_large', 'The image is too large. Choose an image under 20 MB.', 413));
+
+          type ImgbbResponse = { data?: { url: string; delete_url: string }; success?: boolean; error?: { message?: string } };
+          let lastStatus = 0;
+          let lastData: ImgbbResponse | null = null;
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            const upload = new FormData();
+            upload.append('image', image, image.name || 'image.webp');
+            try {
+              const response = await fetch(`https://api.imgbb.com/1/upload?key=${env.IMGBB_API_KEY}`, { method: 'POST', body: upload });
+              lastStatus = response.status;
+              const data = (await response.json().catch(() => null)) as ImgbbResponse | null;
+              lastData = data;
+              if (response.ok && data?.success && data.data?.url) return out(json({ provider: 'imgbb', url: data.data.url, deleteUrl: data.data.delete_url }));
+              if (response.status !== 408 && response.status !== 429 && response.status < 500) break;
+            } catch { lastStatus = 0; }
+            if (attempt < 2) await new Promise<void>((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+          }
+          if (lastStatus >= 400 && lastStatus < 500) {
+            return out(err('imgbb_rejected', lastData?.error?.message || 'ImgBB rejected this image. Try a different PNG, JPG, or WebP file.', 422));
+          }
+          return out(err('imgbb_unavailable', 'Image hosting is temporarily unavailable. We retried automatically; please try again shortly.', 502));
         }
 
         if (path === '/api/uploads/apk-inspect' && req.method === 'POST') {
-          // APK bane bina store kiye manifest auto-read (console form auto-fill ke liye).
+          // Optional, non-blocking metadata preflight. It never stores the APK.
           const form = await req.formData();
-          const file = form.get('file') as File | null;
-          if (!file) return out(err('bad_request', 'An APK file is required', 400));
+          const file = form.get('file');
+          if (!file || typeof file === 'string' || !validApkName(file.name)) return out(err('bad_request', 'Choose an Android APK file (.apk).', 400));
+          if (!file.size || file.size > MAX_APK_SIZE) return out(err('apk_too_large', 'APK must be between 1 byte and 50 MB.', 413));
           const bytes = await file.arrayBuffer();
+          const header = new Uint8Array(bytes, 0, Math.min(2, bytes.byteLength));
+          if (header[0] !== 0x50 || header[1] !== 0x4b) return out(err('invalid_apk', 'This file is not a valid APK archive.', 400));
           const [manifest, sha256] = await Promise.all([parseApkManifest(bytes), sha256Hex(bytes)]);
           return out(json({ manifest, sizeBytes: file.size, sha256 }));
         }
 
-        if (path === '/api/uploads/apk-ticket' && req.method === 'POST') {
-          // Rule: <=25MB GitHub (Worker upload karega) - >25MB B2 (browser direct presigned)
-          const body = (await req.json()) as { packageName: string; versionCode: number; fileName: string; sizeBytes: number; contentType?: string };
-          if (!body?.sizeBytes) return out(err('bad_request', 'sizeBytes is required', 400));
-          if (body.sizeBytes <= APK_GITHUB_LIMIT) {
-            return out(json({ provider: 'github', mode: 'worker-upload', uploadUrl: '/api/uploads/apk' }));
-          }
-          if (!env.B2_KEY_ID || !env.B2_BUCKET || !env.B2_S3_ENDPOINT) return out(err('b2_not_configured', 'Backblaze B2 is not configured', 503));
-          const key = `${body.packageName}/${body.versionCode}/${body.fileName}`;
-          const uploadUrl = await b2PresignedPut(env, key);
-          const publicUrl = env.B2_PUBLIC_BASE ? `${env.B2_PUBLIC_BASE.replace(/\/$/, '')}/${key}` : uploadUrl.split('?')[0];
-          return out(json({ provider: 'b2', mode: 'presigned-put', uploadUrl, publicUrl, key }));
-        }
-
         if (path === '/api/uploads/apk' && req.method === 'POST') {
-          // GitHub wala raasta: chhoti APK Worker ke through storefiles Releases me
-          if (!env.GITHUB_FILES_TOKEN) return out(err('github_not_configured', 'GITHUB_FILES_TOKEN is not configured', 503));
+          if (!env.GITHUB_FILES_TOKEN) return out(err('github_not_configured', 'APK hosting is not configured yet. Please try again later.', 503));
           const form = await req.formData();
-          const file = form.get('file') as File | null;
-          const packageName = String(form.get('packageName') ?? '');
+          const file = form.get('file');
+          const packageName = String(form.get('packageName') ?? '').trim().toLowerCase();
           const versionCode = Number(form.get('versionCode') ?? 0);
-          if (!file || !packageName || !versionCode) return out(err('bad_request', 'file, packageName, and versionCode are required', 400));
-          if (file.size > APK_GITHUB_LIMIT) return out(err('too_large_for_github', 'APKs over 25 MB go to Backblaze B2; request /api/uploads/apk-ticket first', 413));
+          if (!file || typeof file === 'string' || !APK_PACKAGE_RE.test(packageName) || !Number.isInteger(versionCode) || versionCode < 1) {
+            return out(err('bad_request', 'A valid APK file, package name, and positive version code are required.', 400));
+          }
+          if (!validApkName(file.name)) return out(err('bad_request', 'Choose an Android APK file (.apk).', 400));
+          if (!file.size || file.size > MAX_APK_SIZE) return out(err('apk_too_large', 'The reliable APK upload limit is 50 MB.', 413));
+          const owned = await ownsPackage(env, user, packageName);
+          if ('error' in owned) return out(owned.error);
           const bytes = await file.arrayBuffer();
+          const header = new Uint8Array(bytes, 0, Math.min(2, bytes.byteLength));
+          if (header[0] !== 0x50 || header[1] !== 0x4b) return out(err('invalid_apk', 'This file is not a valid APK archive.', 400));
           const [manifest, sha256] = await Promise.all([parseApkManifest(bytes), sha256Hex(bytes)]);
           if (manifest.packageName && manifest.packageName !== packageName) {
-            return out(err('package_mismatch', `The APK package (${manifest.packageName}) does not match this listing (${packageName})`, 400));
+            return out(err('package_mismatch', `The APK package (${manifest.packageName}) does not match this listing (${packageName}).`, 400));
           }
           const downloadUrl = await githubUploadApk(env, packageName, versionCode, file.name, bytes);
           return out(json({ provider: 'github', url: downloadUrl, key: `${packageName}@${versionCode}/${file.name}`, manifest, sha256, sizeBytes: file.size }));
@@ -653,10 +671,14 @@ export default {
           }
           const taken = await sbList<Row>(env, `apps?package_name=eq.${enc(packageName)}&select=id`);
           if (taken.length) return out(err('package_taken', 'This package name is already taken', 409));
+          // Do not rely on database defaults here. Some existing Store projects
+          // were created before the defaults were added; sending explicit empty
+          // values keeps a new draft valid on both schema versions.
           const w = await sbWrite(env, 'apps', 'POST', {
             id: newId('app'), developer_id: str(developer.id), package_name: packageName, name,
             category: str(body.category, 'tools'), kind: str(body.kind, 'app') === 'game' ? 'game' : 'app',
-            status: 'draft', support_email: str(developer.support_email),
+            status: 'draft', short_desc: '', full_desc: '', icon_url: '', tags: [],
+            support_email: str(developer.support_email),
           });
           if (!w.ok) return out(w.status === 409 ? err('package_taken', 'This package name is already taken', 409) : dbFail(w.detail));
           const bundle = await bundleApps(env, w.rows);
@@ -685,6 +707,17 @@ export default {
           if (!relRows.length) return out(err('not_found', 'Release not found', 404));
           const rel = relRows[0];
           if (!str(rel.apk_url)) return out(err('bad_request', 'Upload the APK file before submitting for review', 400));
+          // A server-side gate prevents a client from bypassing the console
+          // checklist and submitting an empty/broken store listing.
+          const screenshots = await sbList<Row>(env, `app_screenshots?app_id=eq.${enc(appId)}&select=id`);
+          const missing: string[] = [];
+          if (!str(owned.app.name).trim()) missing.push('app name');
+          if (!str(owned.app.short_desc).trim()) missing.push('short description');
+          if (!str(owned.app.full_desc).trim()) missing.push('full description');
+          if (!str(owned.app.icon_url).trim()) missing.push('app icon');
+          if (!str(owned.app.support_email).trim()) missing.push('support email');
+          if (screenshots.length < 2) missing.push('at least 2 screenshots');
+          if (missing.length) return out(err('listing_incomplete', `Complete your store listing before review: ${missing.join(', ')}.`, 400));
           const pending = await sbList<Row>(env, `review_submissions?release_id=eq.${enc(str(rel.id))}&status=eq.pending&select=*`);
           let submission = pending[0] ?? null;
           if (!submission) {
@@ -728,9 +761,14 @@ export default {
             const maxCode = existing.length ? num(existing[0].version_code) : 0;
             if (versionCode <= maxCode) return out(err('version_code_not_increasing', `Version code must be higher than the current highest version code (${maxCode})`, 400));
             const sizeBytes = num(apk.sizeBytes ?? body.sizeBytes);
-            const provider = str(apk.provider, sizeBytes <= APK_GITHUB_LIMIT ? 'github' : 'b2');
-            if (provider !== 'github' && provider !== 'b2') return out(err('bad_request', 'APK provider must be github or b2', 400));
+            const provider = str(apk.provider, 'github');
+            const apkUrl = str(apk.url);
+            const githubPrefix = `https://github.com/${env.GITHUB_FILES_OWNER}/${env.GITHUB_FILES_REPO}/releases/download/`;
+            if (provider !== 'github') return out(err('bad_request', 'APKs must be uploaded through GitHub storefiles.', 400));
+            if (!Number.isInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > MAX_APK_SIZE) return out(err('apk_too_large', 'The reliable APK upload limit is 50 MB.', 413));
+            if (!apkUrl.startsWith(githubPrefix)) return out(err('invalid_apk_url', 'Create the release from an APK uploaded through this console.', 400));
             const w = await sbWrite(env, 'app_releases', 'POST', {
+
               id: newId('rel'), app_id: appId, version_code: versionCode, version_name: versionName,
               apk_provider: provider, apk_key: str(apk.key), apk_url: str(apk.url), apk_size_bytes: sizeBytes,
               apk_sha256: str(apk.sha256) || null,
@@ -779,7 +817,16 @@ export default {
               iconUrl: 'icon_url', featureGraphicUrl: 'feature_graphic_url', supportEmail: 'support_email',
               website: 'website', privacyPolicyUrl: 'privacy_policy_url',
             };
-            for (const [from, to] of Object.entries(fields)) if (from in body) patchRow[to] = str(body[from]) || null;
+            // Only genuinely optional fields become NULL. `icon_url`, text
+            // descriptions and support_email are NOT NULL in the Store schema;
+            // converting an empty draft value to null was the reason a listing
+            // save/create could fail with Postgres 23502 before APK upload.
+            const nullableFields = new Set(['featureGraphicUrl', 'website', 'privacyPolicyUrl']);
+            for (const [from, to] of Object.entries(fields)) {
+              if (!(from in body)) continue;
+              const value = str(body[from]);
+              patchRow[to] = nullableFields.has(from) ? value || null : value;
+            }
             if ('kind' in body) patchRow.kind = str(body.kind) === 'game' ? 'game' : 'app';
             if ('tags' in body) patchRow.tags = strArr(body.tags);
             // An echoed status is not a transition; only actual changes need the guard.
