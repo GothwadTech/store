@@ -32,9 +32,14 @@ npm run dev            # → http://localhost:3000 (neeche 4-site switcher mileg
 npm run worker:dev     # dusre terminal me → http://127.0.0.1:8787
 ```
 
-Login bina backend ke test karne ke liye **Demo mode** button hai (sirf
-local/preview par dikhta hai). Asli login = **Sign in with Gothwad**
-(Gothwad Accounts OAuth + PKCE — `docs/SETUP.md` §2 dekho).
+Production login **Sign in with Gothwad** (Gothwad Accounts OAuth + PKCE —
+`docs/SETUP.md` §2) se hota hai. Localhost aur non-production previews par
+optional **Demo** sign-in, sample listings, and local-only actions remain
+available for development. The apex and every subdomain under
+`gothwadtech.com` are synchronously gated to empty/API-only initial state: no
+demo buttons, fake identity, or seed
+listings render there. If the production Worker/API is unavailable, the catalog
+stays empty and the app shows its backend status.
 
 ## 💾 Storage ke pakke niyam
 

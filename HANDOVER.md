@@ -10,9 +10,10 @@
 > [`TASK.md`](TASK.md) (live checklist) → [`sql/README.md`](sql/README.md)
 > (before touching SQL) → [`docs/SETUP.md`](docs/SETUP.md) (deployment).
 >
-> **Last updated:** 2026-10-16 (Session 2) · Session 1 ka kaam PR **#1** se
-> `main` me merge ho chuka hai. Session 2 (admin domain change + asli backend
-> wiring, §4.8) branch `arena/31dfaecf-store` par hai — uska PR merge karo.
+> **Last updated:** 2026-10-16 (Session 3 — local/preview demo retained and
+> synchronously gated off production domains; Worker download/status safeguards
+> retained). Sessions 1 and 2 form the repository baseline; the current task
+> branch is tracked by Arena.
 
 ---
 
@@ -90,18 +91,20 @@ them away:
    go live without review in Phase 1; APKs never do. This line must not be
    crossed.
 6. **UI language = US English, everywhere, always.** All user-visible strings
-   (Store, Console, Admin, landing page, API error messages, seed/demo
-   content) are in US English. The owner communicates in Hinglish in chat,
+   (Store, Console, Admin, landing page, and API error messages) are in US
+   English. The owner communicates in Hinglish in chat,
    but the product UI must never contain Hindi/Hinglish text.
 7. **Dark theme background is `#212121`** (neutral dark gray — Material-style).
    Surfaces: sidebar `#1d1d1d`, cards/panels `#2a2a2a`, inputs `#1e1e1e`,
    borders white at 6–12% opacity, emerald accent (Tailwind `emerald-*`).
    The old blue-gray `#0b1220` theme was removed on owner instruction; do not
    bring it back. `theme-color`, PWA manifest, and CSS tokens match `#212121`.
-8. **Admins are defined by env, not DB.** `ADMIN_USERNAMES` in
+8. **Production admins are defined by env, not DB.** `ADMIN_USERNAMES` in
    `worker/wrangler.toml` (comma-separated Gothwad Accounts usernames;
-   currently `pawan`). The frontend's demo check mirrors this only for
-   non-production hosts.
+   currently `pawan`). The Worker is the sole authority on production. The
+   separate local/preview demo identity (`pawan`) may exercise the demo admin
+   UI only on non-production hostnames; a synchronous hostname gate prevents
+   that identity and its controls from rendering on `gothwadtech.com` domains.
 9. **Secrets never in git/code.** `SUPABASE_SERVICE_ROLE_KEY`,
    `IMGBB_API_KEY`, `GITHUB_FILES_TOKEN` (fine-grained, storefiles repo only),
    `B2_KEY_ID`, `B2_APP_KEY` — Worker secrets (dashboard or `wrangler secret
@@ -131,11 +134,12 @@ store/
 │   ├── App.tsx            hostname/mode selector + preview mode switcher
 │   ├── index.css          Tailwind 4 + #212121 tokens
 │   ├── types.ts           shared types (AppStatus, StoreApp, AppRelease, …)
-│   ├── data/seed.ts       demo catalog (8 apps, reviews, submissions, reports)
+│   ├── data/seed.ts       sample listings/actions for local/preview only
+│   ├── data/categories.ts category display labels used by the UI
 │   ├── lib/
-│   │   ├── config.ts      domains, mode detection, OAuth client config
+│   │   ├── config.ts      domains, mode detection, production/demo host gate
 │   │   ├── api.ts         Worker API client (store/dev/admin/uploads, upload flows)
-│   │   ├── auth.ts        Gothwad sign-in (PKCE), /api/me, demo session
+│   │   ├── auth.ts        Gothwad sign-in (PKCE), /api/me, preview demo identity
 │   │   ├── storage.ts     provider routing (≤25MB GitHub / >25MB B2), image compression
 │   │   ├── router.ts      tiny path router (no react-router dependency)
 │   │   └── AppContext.tsx GLOBAL STATE: apps/releases/reviews/submissions/…
@@ -172,10 +176,10 @@ Vite proxy, all four modes return 200).
   category chips; separate **Apps** and **Games** views (`HomePage kind`)
 - Search (`/search?q=`), category pages, top charts, developer pages
 - **App detail** (`/app/:packageName`): stats strip (rating, downloads, size,
-  version), Install button with simulated download progress, screenshot
-  carousel, About, "What's new", Data-safety/permissions list (from live
-  release), SHA-256 slot, wishlist, report, rating breakdown UI, write-a-review
-  form, developer reply display, similar apps
+  version), live Install action, preview-only simulated sample download,
+  screenshot carousel, About, "What's new", Data-safety/permissions list,
+  SHA-256 slot, wishlist, report, rating breakdown UI, write-a-review form,
+  developer reply display, similar apps
 - Library/Wishlist page (`/library`), mobile bottom navigation, desktop top nav
 - PWA manifest + dark `#212121` Play-style layout
 
@@ -196,13 +200,15 @@ Indus/Play-Console-inspired professional layout:
 - **App detail** with underlined tabs (`/apps/:id`, `/apps/:id/releases`,
   `/apps/:id/reviews`):
   - *Store listing:* details form, graphics (icon upload, screenshot grid with
-    add/remove — browser-compressed, ImgBB-bound), contact & privacy,
-    **sticky save bar** with discard
+    add/remove — browser-compressed; local demo stores data URLs, live mode uses
+    ImgBB), contact & privacy, **sticky save bar** with discard
   - *Releases:* APK drop-zone that shows the GitHub/B2 rule from file size,
-    version name/code + release notes, **release history table**, submit-for-review
+    version name/code + release notes, **release history table**, submit-for-review;
+    preview accepts a local simulated release without uploading APK bytes
   - *Reviews:* per-app reviews with developer reply
   - Unpublish/republish actions; reviewer rejection note banner
-- **Statistics:** weekly download bar charts per published app + totals
+- **Statistics:** weekly download charts + totals from the Worker for real users;
+  explicitly labeled illustrative sample values in local demo mode
 - **Reviews:** cross-app review inbox with public replies
 - **Developer profile settings** + read-only Gothwad Account identity card
 
@@ -221,22 +227,21 @@ Indus/Play-Console-inspired professional layout:
   `https://storeapp.gothwadtech.com`
 
 ### 4.5 Cross-cutting behavior (important to know before editing)
-- **State is hybrid since Session 2.** `src/lib/AppContext.tsx` boot par
-  Worker se hydrate hota hai (`/api/store/apps` catalog → `/api/me` session →
-  dev/admin bundles, `src/lib/api.ts` client se) aur saari actions asal user
-  ke liye Worker API par jati hain. Backend **unconfigured** mile
-  (`source: "unconfigured"` / 503) to wahi purana raasta: `src/data/seed.ts`
-  se seed + `localStorage` (`gothwad-store-state-v1`) persistence + demo
-  actions. Live mode me localStorage me kuch persist nahi hota — Worker hi
-  source of truth hai. Demo user (`demo-user-1`) hamesha local mode me
-  rehta hai.
-- **Full demo loop works without any backend:** Demo sign-in (dev/preview
-  only — the button is hidden on `*.gothwadtech.com` hosts; see
-  `isProductionHost()` in `src/lib/auth.ts`, demo user `pawan`, which is
-  also admin) → Console: create app → upload "APK" (only file name/size is
-  read locally) → submit → Admin: approve → Store: app is live, downloadable.
-  Objects created via `URL.createObjectURL` for icons are preview-only;
-  in production they are ImgBB URLs returned by the Worker.
+- **Local/preview demo is intentionally retained.** The original seed catalog,
+  reviews/submissions/reports, demo `pawan` identity, local persistence, and
+  local-only actions are available on localhost and non-production previews.
+  Sample APKs are not real and preview releases are never uploaded.
+- **Production is gated synchronously before first render.** `isDemoModeAllowed()`
+  in `src/lib/config.ts` rejects the apex and every `*.gothwadtech.com` host.
+  In those origins the initial state is empty, sample categories/demo user are
+  absent (live categories may load from API), demo login and mode-switcher
+  controls are hidden, and backend failures never
+  fall back to seed/local data. Old demo storage keys are cleared after render
+  without ever displaying their values.
+- **Real users use the Worker API only.** The frontend hydrates from catalog →
+  session → developer/admin bundles. API writes do not silently become local
+  writes on network or configuration failure. The Worker remains the sole
+  production authority for admin access.
 - **Mode switching:** production resolves by hostname. Anywhere else
   (localhost, `*.e2b.app` preview) `?mode=store|console|admin|storeapp`
   wins, then `localStorage gothwad-site-mode`, default `store`. A floating
@@ -256,7 +261,7 @@ Base: each production site proxies/serves the same Worker at `/api/*`.
 | `GET /api/me` | ✅ verifies Accounts cookie or Bearer via Accounts (`/api/auth/me`, `/oauth/userinfo`); attaches developer row + `isAdmin` when DB is configured |
 | `POST /api/auth/exchange` | ✅ OAuth code → tokens (PKCE verifier) → user |
 | `POST /api/auth/signout` | ✅ (stateless ack; cookies belong to Accounts) |
-| `GET /api/store/categories`, `/api/store/home`, `/api/store/apps` (kind/category/q filters), `/api/store/apps/:packageName` (listing + screenshots + live release + reviews) | ✅ when Supabase configured; otherwise returns `source: "unconfigured"` payload so the frontend demo stays alive |
+| `GET /api/store/categories`, `/api/store/home`, `/api/store/apps` (kind/category/q filters), `/api/store/apps/:packageName` (listing + screenshots + live release + reviews) | ✅ when Supabase configured; otherwise returns an empty `source: "unconfigured"` payload (no fixture data) |
 | `GET /api/download/:releaseId` | ✅ records a `downloads` row, 302-redirects to the stored GitHub/B2 URL |
 | `POST /api/uploads/image` | ✅ proxies to ImgBB with the server-side key, returns `{provider, url, deleteUrl}` |
 | `POST /api/uploads/apk-ticket` | ✅ size rule: ≤25 MB → GitHub worker-upload mode; >25 MB → B2 presigned PUT (SigV4, 1 h) + public URL |
@@ -319,9 +324,12 @@ npx vite --port=36161 --host=0.0.0.0 --strictPort   # terminal 2 — current pre
 
 - Open `http://localhost:36161/?mode=store` — use the floating switcher
   (bottom center, non-production only) to jump between the four sites.
-- Click **Explore demo mode** on Console/Admin to sign in as `pawan`
-  (developer + admin) without any backend. Reload keeps state via localStorage;
-  clear `gothwad-store-state-v1` to reset to seed data.
+- Click **Demo** or **Explore demo mode** on localhost/preview to sign in as
+  `pawan` (demo developer + admin) without a backend. Listings, local actions,
+  and profile state persist in this browser; clear `gothwad-store-state-v1` and
+  `gothwad-demo-user` to reset. Sample APK actions are simulations only and do
+  not upload a file. On production domains the demo identity and seeded UI are
+  gated off before the first render; real auth uses Gothwad Accounts.
 - Health checks: `curl http://127.0.0.1:36161/api/health` (via proxy) or
   `curl http://127.0.0.1:8787/api/health`.
 - Before every push: `npm run build` **and**
@@ -369,10 +377,10 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
    downloads dedupe (basic IP+app+day), rating aggregate update on review
    write. Keep English JSON errors `{error, message}`.
 2. ~~**Frontend ↔ API wiring:** move `AppContext` reads/writes (public store
-   first, then console/admin) from local state to the Worker; keep seed data
-   only as an unconfigured-backend fallback; map API responses to the
-   existing `types.ts` shapes (the Android app depends on them too — do not
-   rename fields casually).
+   first, then console/admin) from local state to the Worker; map API responses
+   to the existing `types.ts` shapes (the Android app depends on them too — do
+   not rename fields casually).~~ (done; local sample fallback is intentionally
+   retained only on non-production preview hosts.)
 3. ~~**Real uploads:** wire console image uploads to `POST /api/uploads/image`
    (ImgBB) and APK flow to `apk-ticket`/`apk` (GitHub ≤25 MB via Worker;
    B2 presigned direct upload >25 MB) with progress; persist returned URLs
@@ -384,12 +392,13 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
 5. **Auth hardening pass:** confirm rotated Accounts cookies are forwarded
    correctly on all four subdomains against the live Accounts deployment
    (the Mail project hit this class of bug — signed-in loops — so test the
-   real cookie SSO, not just demo mode); add the returned-session diagnostic
+   real cookie SSO); add the returned-session diagnostic
    (401 only for a real Accounts 401; other failures surface as distinct
    5xx codes) like Mail does.
 6. **Live end-to-end test** on a real Android phone, then update `TASK.md`.
-7. **Reviews/statistics polish:** rating breakdown bars from real review
-   counts; stats from the `downloads` table (daily series, not demo math).
+7. **Reviews/statistics polish:** add rating-breakdown bars from real review
+   counts. Console daily statistics now call the Worker `/stats` endpoint and
+   display recorded download counts (no generated chart values).
 8. **Android integration (separate repo):** replace `DummyStoreData` in
    `GothwadTech/storeapp` with this API (`https://store.gothwadtech.com/api`),
    mapping responses onto its existing `AppItem` fields; Android login uses
@@ -403,9 +412,11 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
   (SHA-256 is stored per release; keep a B2 backup of every APK); B2's free
   allowance is 10 GB. The Worker must keep absorbing provider failures with
   clear English errors rather than crashing pages.
-- **Current demo data is illustrative, not production content:** 8 seeded
-  apps/reviews exist only so the UI is alive before the DB is wired. Do not
-  treat seed download/rating numbers as real anywhere.
+- **Seed listings are demo fixtures, not production content.** They remain
+  available only on localhost/non-production previews. Production host gating
+  begins with empty frontend state and displays only live API results; if the
+  catalog API is unconfigured/unavailable, production listings remain empty.
+  SQL category rows are the canonical taxonomy, not sample app listings.
 - **Listing edits currently bypass review (Phase 1 decision).** If abuse
   appears, move listing edits behind review too — the status machine already
   supports it.
@@ -440,5 +451,6 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
 
 ---
 
-*End of handover. Next action for whoever reads this: if the Session 2 PR is
-merged, deployment is §6.1 (owner) and the next build task is §6.2 item 5.*
+*End of handover. Next action: run the current lint, tests, and production build
+for the preview-only demo/production-host correction. Then follow §6.1 for
+owner-only deployment steps and continue with §6.2.*

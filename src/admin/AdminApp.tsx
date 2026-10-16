@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Ban, Check, Flag, LayoutDashboard, ListChecks, LogOut, ShieldCheck, Star, X } from 'lucide-react';
 import { useApp } from '../lib/AppContext';
 import { AppIcon, Logo, SignInPrompt, StatusBadge } from '../shared/ui';
+import { BackendNotice } from '../shared/BackendNotice';
 import { apkProviderLabel, formatBytes, formatCount } from '../lib/storage';
 
 const btnPrimary = 'inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500';
@@ -9,8 +10,9 @@ const btnDanger = 'inline-flex items-center justify-center gap-2 rounded-lg bg-r
 const btnGhost = 'inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 px-4 py-2 text-sm font-medium text-neutral-200 transition hover:bg-white/5';
 
 function Gate({ children }: { children: React.ReactNode }) {
-  const { user, isAdmin, signInDemo, signOut } = useApp();
-  if (!user) return <div className="min-h-dvh bg-[#212121]"><SignInPrompt onDemo={signInDemo} what="Store Admin" /></div>;
+  const { user, isAdmin, authReady, backendLive, demoModeAvailable, isDemoUser, signOut } = useApp();
+  if (!authReady) return <div className="grid min-h-dvh place-items-center bg-[#212121] text-neutral-400">Checking your Gothwad Account…</div>;
+  if (!user) return <div className="min-h-dvh bg-[#212121]"><SignInPrompt what="Store Admin" /></div>;
   if (!isAdmin)
     return (
       <div className="grid min-h-dvh place-items-center bg-[#212121] px-4 text-center">
@@ -22,6 +24,7 @@ function Gate({ children }: { children: React.ReactNode }) {
         </div>
       </div>
     );
+  if (!backendLive && !(demoModeAvailable && isDemoUser)) return <div className="min-h-dvh bg-[#212121] px-4 py-12 text-neutral-300"><BackendNotice /><p className="mx-auto mt-5 max-w-xl text-center text-sm text-neutral-400">Admin tools are unavailable until the Store service is connected.</p></div>;
   return <>{children}</>;
 }
 
@@ -63,6 +66,7 @@ export default function AdminApp() {
         </aside>
 
         <main className="mx-auto w-full max-w-[1180px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
+          <BackendNotice />
           {tab === 'queue' && (
             <>
               <h1 className="text-[22px] font-semibold tracking-tight text-white sm:text-2xl">Review queue</h1>

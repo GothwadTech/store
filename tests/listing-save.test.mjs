@@ -25,6 +25,7 @@ for (const scenario of [
   { label: 'In-review listing with unchanged status', current: 'in_review', body: { status: 'in_review' }, expected: 200 },
   { label: 'Published listing with unchanged status', current: 'published', body: { status: 'published' }, expected: 200 },
   { label: 'Draft cannot publish without a live release', current: 'draft', body: { status: 'published' }, expected: 400, error: 'no_live_release' },
+  { label: 'Developer cannot restore a suspended app', current: 'suspended', body: { status: 'published' }, expected: 403, error: 'app_suspended' },
   { label: 'Actual transition to draft is still forbidden', current: 'in_review', body: { status: 'draft' }, expected: 400, error: 'bad_request' },
 ]) {
   test(scenario.label, async (t) => {
