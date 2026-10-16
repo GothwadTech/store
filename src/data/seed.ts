@@ -126,7 +126,7 @@ export const SEED_SUBMISSIONS: Submission[] = [
   {
     id: 'sub2', appId: 'app-turborace', appName: 'Turbo Race 3D', packageName: 'com.indie.turborace',
     developerName: 'IndieWorks Studio', releaseId: 'rel-tr-9', versionName: '2.0.1', versionCode: 21,
-    apkProvider: 'b2', apkSizeBytes: 148 * 1024 * 1024, status: 'pending', submittedAt: now,
+    apkProvider: 'github', apkSizeBytes: 32 * 1024 * 1024, status: 'pending', submittedAt: now,
   },
 ];
 
