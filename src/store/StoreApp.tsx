@@ -94,7 +94,7 @@ function HomePage({ navigate, kind }: { navigate: (p: string) => void; kind?: 'a
             </span>
           </button>
           <div className="rounded-3xl border border-white/[0.07] bg-white/[0.03] p-4 lg:col-span-2">
-            <SectionTitle title="Top charts" sub="Sabse zyada download hone wale" />
+            <SectionTitle title="Top charts" sub="Most downloaded apps and games" />
             {top.slice(0, 4).map((a, i) => <AppRow key={a.id} app={a} rank={i + 1} onOpen={open} />)}
             <button onClick={() => navigate('/charts')} className="mt-2 flex items-center gap-1 px-3 text-sm font-semibold text-emerald-300">See all <ChevronRight size={15} /></button>
           </div>
@@ -130,7 +130,7 @@ function SearchPage({ navigate, query }: { navigate: (p: string) => void; query:
 
 function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string) => void }) {
   const ctx = useApp();
-  const { user, reviews, wishlist, toggleWishlist, recordDownload, liveReleaseOf, addReview, signInDemo, reportApp } = ctx;
+  const { user, reviews, wishlist, toggleWishlist, recordDownload, liveReleaseOf, addReview, signInDemo, reportApp, backendLive } = ctx;
   const rel = liveReleaseOf(app.id);
   const appReviews = reviews.filter((r) => r.appId === app.id);
   const wished = wishlist.includes(app.id);
@@ -147,8 +147,9 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
       setProgress((p) => {
         if (p === null || p >= 100) {
           clearInterval(t);
-          recordDownload(app);
-          if (rel?.apkUrl) window.open(rel.apkUrl, '_blank', 'noopener');
+          void recordDownload(app);
+          // Live mode me apkUrl = /api/download/:releaseId (Worker count karke asal file par bhejta hai).
+          if (backendLive && rel?.apkUrl) window.open(rel.apkUrl, '_blank', 'noopener');
           setToast('Download started. Open the APK to install it.');
           return 100;
         }
@@ -203,7 +204,7 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
             {(rel?.permissions.length ? rel.permissions : ['android.permission.INTERNET']).map((p) => <li key={p} className="rounded-lg bg-white/[0.04] px-3 py-2 font-mono text-xs">{p}</li>)}
           </ul>
           {rel?.apkSha256 && <p className="mt-2 break-all font-mono text-[11px] text-neutral-600">SHA-256: {rel.apkSha256}</p>}
-          {user && <button onClick={() => { reportApp(app, 'Other', ''); setToast('Report submitted. Our team will review it. Thank you.'); }} className="mt-6 flex items-center gap-1.5 text-xs text-neutral-500 hover:text-red-300"><Flag size={13} /> Report this app</button>}
+          {user && <button onClick={() => { void reportApp(app, 'Other', '').then(() => setToast('Report submitted. Our team will review it. Thank you.')).catch((err: Error) => setToast(err.message)); }} className="mt-6 flex items-center gap-1.5 text-xs text-neutral-500 hover:text-red-300"><Flag size={13} /> Report this app</button>}
         </div>
         <aside className="h-fit rounded-3xl border border-white/[0.07] bg-white/[0.03] p-5">
           <h3 className="font-display font-bold text-white">Developer</h3>
@@ -226,7 +227,7 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
           </div>
           <div>
             {user ? (
-              <form className="mb-6 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4" onSubmit={(e) => { e.preventDefault(); addReview(app.id, rating, body); setBody(''); }}>
+              <form className="mb-6 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4" onSubmit={(e) => { e.preventDefault(); void addReview(app.id, rating, body).then(() => setBody('')).catch((err: Error) => setToast(err.message)); }}>
                 <p className="text-sm font-semibold text-white">Write your review, @{user.username}</p>
                 <div className="mt-2 flex gap-1">{[1, 2, 3, 4, 5].map((n) => <button type="button" key={n} onClick={() => setRating(n)} aria-label={`${n} star`}><Star size={24} className={n <= rating ? 'fill-amber-400 text-amber-400' : 'text-neutral-600'} /></button>)}</div>
                 <textarea value={body} onChange={(e) => setBody(e.target.value)} required rows={3} placeholder="What did you think of this app?" className="mt-3 w-full rounded-xl bg-black/25 px-3 py-2.5 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-neutral-500 focus:ring-emerald-400/50" />

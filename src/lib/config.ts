@@ -12,7 +12,7 @@ export type SiteMode = 'store' | 'console' | 'admin' | 'storeapp';
 
 export function detectMode(): SiteMode {
   const host = window.location.hostname.toLowerCase();
-  if (host.startsWith('admin.console.')) return 'admin';
+  if (host.startsWith('storeadmin.')) return 'admin';
   if (host.startsWith('console.')) return 'console';
   if (host.startsWith('storeapp.')) return 'storeapp';
   if (host.startsWith('store.')) return 'store';
@@ -28,7 +28,7 @@ export function detectMode(): SiteMode {
 export const SITE_URLS: Record<SiteMode, string> = {
   store: 'https://store.gothwadtech.com',
   console: 'https://console.gothwadtech.com',
-  admin: 'https://admin.console.gothwadtech.com',
+  admin: 'https://storeadmin.gothwadtech.com',
   storeapp: 'https://storeapp.gothwadtech.com',
 };
 

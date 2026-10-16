@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-// Ek hi Pages project - 4 custom domains (store / console / admin.console / storeapp)
+// Ek hi Pages project - 4 custom domains (store / console / storeadmin / storeapp)
 // Dev me /api ko isi repo ke Worker (port 8787) par proxy karte hain.
 export default defineConfig({
   plugins: [react(), tailwindcss()],

@@ -8,7 +8,7 @@ project, ek hi Worker, ek hi (alag) Supabase project.
 |------|--------|---------|
 | 🛍️ Store | `store.gothwadtech.com` | Apps/games browse, search, download, reviews |
 | 🧑‍💻 Developer Console | `console.gothwadtech.com` | App publish, listing, releases, stats |
-| 🛡️ Admin | `admin.console.gothwadtech.com` | Manual review queue, suspend, reports |
+| 🛡️ Admin | `storeadmin.gothwadtech.com` | Manual review queue, suspend, reports |
 | 📱 Store App | `storeapp.gothwadtech.com` | Store Android app ka download page |
 
 Android app alag repo [`GothwadTech/storeapp`](https://github.com/GothwadTech/storeapp)
@@ -39,7 +39,7 @@ local/preview par dikhta hai). Asli login = **Sign in with Gothwad**
 ## 💾 Storage ke pakke niyam
 
 - **Images** (icon/screenshots/logo) → **ImgBB** sirf
-- **APK ≤ 25 MB** → **GitHub** repo `GothwadTech/store-files` (Releases)
+- **APK ≤ 25 MB** → **GitHub** repo `GothwadTech/storefiles` (Releases)
 - **APK > 25 MB** → **Backblaze B2**
 - **Supabase** → sirf database (500 MB metadata). Storage bucket **nahi** banta.
 

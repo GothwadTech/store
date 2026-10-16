@@ -5,7 +5,7 @@
 > live status [`TASK.md`](TASK.md) me dekho. Yeh file design ka source of truth hai.
 >
 > **Final faisle (owner):** 4 domains ek Pages par · storage sirf
-> ImgBB + GitHub `store-files` (APK ≤25MB) + Backblaze B2 (>25MB) ·
+> ImgBB + GitHub `storefiles` (APK ≤25MB) + Backblaze B2 (>25MB) ·
 > **Supabase Storage bilkul nahi** (Supabase = sirf database) · manual review.
 >
 > **Last updated:** 2026-10-16
@@ -32,7 +32,7 @@
         │  EK alag Supabase project (Store ka apna, SIRF DB)│
         └─────────────────────────────────────────────────┘
               ▲                              ▲
-   store · console · admin.console · storeapp (Pages custom domains)
+   store · console · storeadmin · storeapp (Pages custom domains)
    storeapp.* = Store Android app ka download page
               │                              │
               └──── Frontend hostname dekh kar shell switch karega ────┘
@@ -103,7 +103,7 @@ Dono sites (Store + Console) ka login **sirf Gothwad Accounts** se hoga. Koi ala
 -- redirect_uris = ARRAY[
 --   'https://store.gothwadtech.com/auth/callback',
 --   'https://console.gothwadtech.com/auth/callback',
---   'https://admin.console.gothwadtech.com/auth/callback',
+--   'https://storeadmin.gothwadtech.com/auth/callback',
 --   'http://localhost:3000/auth/callback'        -- dev
 -- ]
 -- scopes: profile email offline_access
@@ -217,7 +217,7 @@ Play Console / Indus Developer Console jaisa: left sidebar + dashboard. **Har de
 **Review rules (Phase 1):**
 - Har **naya APK version** review se jayega. Jab tak approve nahi, purana published version hi live rahega.
 - Listing (text/images) edits bina review live — lekin admin kabhi bhi action le sakta hai. (Phase 2 me inhe bhi review me la sakte hain.)
-- Admin panel: `/api/admin/*` + alag site **`admin.console.gothwadtech.com`** (usi Pages project ka chautha domain, sirf `ADMIN_USERNAMES` wale ghus sakte hain).
+- Admin panel: `/api/admin/*` + alag site **`storeadmin.gothwadtech.com`** (usi Pages project ka chautha domain, sirf `ADMIN_USERNAMES` wale ghus sakte hain).
 - Review checklist (admin manually check karega): app khulti hai? naam/icon kisi doosri app ki chori to nahi? description sahi hai? khatarnak permissions (SMS, accessibility...) ka reason hai? malware shak → reject/suspend.
 - Reject par **reason mandatory** — developer ko Console me dikhega, phir se submit kar sakta hai.
 
@@ -244,7 +244,7 @@ Owner ka sawaal tha: Supabase Storage ke alawa R2 ko card chahiye, "blaze..." (�
 | Provider | Free limit | Card? | APK ke liye? | Speed/CDN | Note |
 |----------|-----------|-------|--------------|-----------|------|
 | **Backblaze B2** ⭐ | 10 GB storage, roz 1 GB download free | ❌ nahi chahiye | ✅ **Primary (bade APK)** | Cloudflare ke saath "Bandwidth Alliance" — B2→Cloudflare egress **free**, Workers/CDN se serve | S3-compatible API. R2 ka best card-less replacement. Yehi tune yaad kiya tha — "Blaze" = Backblaze |
-| **GitHub Releases** ⭐ | per-file 2 GB, repo ~reasonable use | ❌ | ✅ **Primary (chhote APK ≤25 MB)** | Fast global CDN (`objects.githubusercontent.com`) | Dedicated public repo e.g. `GothwadTech/store-files`, har release = `package@versionCode` tag. **Warning:** GitHub ToS — sirf file-dumping mirror mat bano; genuine project releases ke roop me rakho, aur B2/Supabase par hash + backup hamesha rakho taaki kal GitHub hata bhi de to file DB se dusre provider par shift ho jaye |
+| **GitHub Releases** ⭐ | per-file 2 GB, repo ~reasonable use | ❌ | ✅ **Primary (chhote APK ≤25 MB)** | Fast global CDN (`objects.githubusercontent.com`) | Dedicated public repo e.g. `GothwadTech/storefiles`, har release = `package@versionCode` tag. **Warning:** GitHub ToS — sirf file-dumping mirror mat bano; genuine project releases ke roop me rakho, aur B2/Supabase par hash + backup hamesha rakho taaki kal GitHub hata bhi de to file DB se dusre provider par shift ho jaye |
 | **Supabase Storage** | 1 GB total, per-file 50 MB (free) | ❌ | ❌ **USE NAHI HOGA (owner decision)** | — | Supabase sirf DATABASE (500 MB metadata) ke liye hai. Files ke liye sirf ImgBB / GitHub / Backblaze B2 |
 | **Cloudflare R2** | 10 GB + egress hamesha free | ✅ **card chahiye** (abhi nahi hai) | 🔜 **Future primary** | sabse best (Cloudflare native) | Card milte hi B2 se R2 par migrate — StorageAdapter ki wajah se sirf config badlegi. Code abhi se R2-ready (S3 API dono ka same hai) |
 | **ImgBB** ⭐ | lagbhag unlimited images, per image 32 MB, free API | ❌ | ❌ sirf images | CDN, hotlink allowed | ✅ **Saari images ke liye PRIMARY (owner decision)** — icons, screenshots, feature graphic, developer logo, avatars. Cloudinary ki zaroorat NAHI hai (neeche §6.4 dekho) |
@@ -260,7 +260,7 @@ Upload aayi
  │     icon 512px, screenshot max 1080px wide, WebP/JPEG. Kaaran §6.4 me.)
  │
  └─ APK
-      ├─ size ≤ 25 MB  → GitHub Releases (store-files repo) + SHA-256 DB me
+      ├─ size ≤ 25 MB  → GitHub Releases (storefiles repo) + SHA-256 DB me
       ├─ size > 25 MB  → Backblaze B2 (S3 API, private bucket, Worker signed URL)
       (🔜 Card milne par: B2 wala raasta R2 me badal jayega — ek env var)
 ```
@@ -271,7 +271,7 @@ Upload aayi
 
 ### 6.3 Environment / secrets iske liye
 
-`GITHUB_FILES_TOKEN` (sirf `store-files` repo ka fine-grained PAT) · `B2_KEY_ID`/`B2_APP_KEY`/`B2_BUCKET` (ya R2 ke `R2_*` baad me) · `IMGBB_API_KEY` — sab **Worker secrets**, code/`wrangler.toml` me kabhi plain nahi (Mail ka `keep_vars`/secrets wala rule yahan bhi). Cloudinary ka koi secret abhi NAHI hai.
+`GITHUB_FILES_TOKEN` (sirf `storefiles` repo ka fine-grained PAT) · `B2_KEY_ID`/`B2_APP_KEY`/`B2_BUCKET` (ya R2 ke `R2_*` baad me) · `IMGBB_API_KEY` — sab **Worker secrets**, code/`wrangler.toml` me kabhi plain nahi (Mail ka `keep_vars`/secrets wala rule yahan bhi). Cloudinary ka koi secret abhi NAHI hai.
 
 ### 6.4 Cloudinary kyun NAHI (owner ka sawaal — faisla pakka)
 
@@ -451,7 +451,7 @@ Android app alag repo me ban raha hai — wo is plan ka **teesra client** hai, a
 
 | Cheez | Kahan | Naam/Note |
 |-------|-------|-----------|
-| Frontend | Cloudflare **Pages** (Git auto-deploy, is repo se) | ek project, **4 custom domains**: `store.gothwadtech.com` · `console.gothwadtech.com` · `admin.console.gothwadtech.com` · `storeapp.gothwadtech.com` |
+| Frontend | Cloudflare **Pages** (Git auto-deploy, is repo se) | ek project, **4 custom domains**: `store.gothwadtech.com` · `console.gothwadtech.com` · `storeadmin.gothwadtech.com` · `storeapp.gothwadtech.com` |
 | API | Cloudflare **Worker** | name = **`store`**, routes: chaaro subdomains ke `/api/*` |
 | Database | **Supabase** (naya project `gothwad-store`) | SQL is repo ke `sql/` folder se (sql/README.md dekho) |
 | APK/images | GitHub Releases + Backblaze B2 + ImgBB (§6) | sab free, bina card |
@@ -471,7 +471,7 @@ Android app alag repo me ban raha hai — wo is plan ka **teesra client** hai, a
 ### Phase 0 — Setup (aadha din)
 - [ ] Supabase project `gothwad-store` banao, URL + keys lo
 - [ ] Accounts ke `ecosystem_apps` me `gothwad-store` register (SQL §3.1) — **human step**
-- [ ] GitHub repo `GothwadTech/store-files` (public) + fine-grained PAT
+- [ ] GitHub repo `GothwadTech/storefiles` (public) + fine-grained PAT
 - [ ] Backblaze B2 account + private bucket + app key · ImgBB API key
 - [ ] Cloudflare: Worker `store` + Pages project khali khada karo, chaaro subdomain jodo
 - [ ] Is repo me `TASK.md` + `AGENTS.md` banao (Accounts walo se adapt)

@@ -24,7 +24,7 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
 -- redirect_uris = ARRAY[
 --   'https://store.gothwadtech.com/auth/callback',
 --   'https://console.gothwadtech.com/auth/callback',
---   'https://admin.console.gothwadtech.com/auth/callback',
+--   'https://storeadmin.gothwadtech.com/auth/callback',
 --   'http://localhost:3000/auth/callback' ]
 ```
 
@@ -35,7 +35,7 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
 | Provider | Kya banana hai | Kya milega |
 |----------|---------------|-----------|
 | **ImgBB** | imgbb.com par account → api.imgbb.com se key | `IMGBB_API_KEY` |
-| **GitHub** | Public repo **`GothwadTech/store-files`** → Settings → Developer settings → Fine-grained PAT (sirf is repo, Contents+Releases write) | `GITHUB_FILES_TOKEN` |
+| **GitHub** | Public repo **`GothwadTech/storefiles`** → Settings → Developer settings → Fine-grained PAT (sirf is repo, Contents+Releases write) | `GITHUB_FILES_TOKEN` |
 | **Backblaze B2** | backblaze.com → B2 Cloud Storage → private bucket (e.g. `gothwad-store-apks`) → App Keys (bucket-scoped) | `B2_KEY_ID`, `B2_APP_KEY`, bucket ka S3 endpoint (`s3.<region>.backblazeb2.com`) |
 
 ## Step 4 — Cloudflare Pages (chaaro sites, ek project)
@@ -44,8 +44,11 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
 2. Build: command `npm run build`, output `dist`. (koi env abhi zaroori nahi)
 3. Custom domains — **chaaro** is ek project par lagao:
    `store.gothwadtech.com` · `console.gothwadtech.com` ·
-   `admin.console.gothwadtech.com` · `storeapp.gothwadtech.com`
+   `storeadmin.gothwadtech.com` · `storeapp.gothwadtech.com`
    (Frontend hostname dekh kar khud sahi site khol lega.)
+   Chaaro domain **one-level** subdomain hain, isiliye Cloudflare ka free
+   **Universal SSL** (`*.gothwadtech.com`) chaaro ko cover kar deta hai —
+   koi paid/advanced certificate lagane ki zaroorat nahi hai.
 
 ## Step 5 — Cloudflare Worker `store` (API)
 
@@ -62,7 +65,7 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
    ```
 3. Routes (Worker → Settings → Domains & Routes → Add route) — **chaaro**:
    `store.gothwadtech.com/api/*` · `console.gothwadtech.com/api/*` ·
-   `admin.console.gothwadtech.com/api/*` · `storeapp.gothwadtech.com/api/*`
+   `storeadmin.gothwadtech.com/api/*` · `storeapp.gothwadtech.com/api/*`
 4. Deploy: `npm run worker:deploy` (ya Git auto-deploy Workers Builds se).
 5. Check: `https://store.gothwadtech.com/api/health` →
    `configured` me sab `true` aana chahiye.
@@ -71,7 +74,7 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
 
 1. `console.gothwadtech.com` → Gothwad Account se sign in → developer bano
 2. Ek test app + chhota APK (≤25MB — GitHub wala raasta pehle test hoga)
-3. `admin.console.gothwadtech.com` (ADMIN_USERNAMES wala username) → Approve
+3. `storeadmin.gothwadtech.com` (ADMIN_USERNAMES wala username) → Approve
 4. `store.gothwadtech.com` par app dikhe → Download → phone par install ✓
 
 > Admin kaun hai: `worker/wrangler.toml` ka `ADMIN_USERNAMES` (comma separated

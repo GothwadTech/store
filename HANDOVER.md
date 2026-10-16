@@ -10,9 +10,9 @@
 > [`TASK.md`](TASK.md) (live checklist) → [`sql/README.md`](sql/README.md)
 > (before touching SQL) → [`docs/SETUP.md`](docs/SETUP.md) (deployment).
 >
-> **Last updated:** 2026-10-16 · Code state: commit `7486cfd` on branch
-> `arena/37d39040-store`, Pull Request **#1** (merge that PR to bring
-> everything below into `main`). Working tree was clean when this was written.
+> **Last updated:** 2026-10-16 (Session 2) · Session 1 ka kaam PR **#1** se
+> `main` me merge ho chuka hai. Session 2 (admin domain change + asli backend
+> wiring, §4.8) branch `arena/31dfaecf-store` par hai — uska PR merge karo.
 
 ---
 
@@ -26,7 +26,7 @@ one frontend build, one API, four websites:
 |------|-------------------|---------|
 | 🛍️ Web Store | `store.gothwadtech.com` | Play-Store-style storefront: browse, search, app pages, reviews, downloads |
 | 🧑‍💻 Developer Console | `console.gothwadtech.com` | Indus/Play-Console-style publishing console for developers |
-| 🛡️ Admin | `admin.console.gothwadtech.com` | Manual review queue, app suspend/restore, user reports |
+| 🛡️ Admin | `storeadmin.gothwadtech.com` | Manual review queue, app suspend/restore, user reports |
 | 📱 Store App page | `storeapp.gothwadtech.com` | Landing page to download the Gothwad Store **Android** app |
 
 The Android app itself is a **separate repo** (`GothwadTech/storeapp`,
@@ -74,8 +74,8 @@ them away:
      Because ImgBB has no on-the-fly transforms, images are resized/compressed
      **in the browser before upload** (`compressImage()` in `src/lib/storage.ts`).
      Cloudinary was considered and explicitly rejected by the owner.
-   - **APK ≤ 25 MB** → **GitHub** repository **`GothwadTech/store-files`**
-     (slug exactly `store-files`; Releases, one tag per `package@versionCode`).
+   - **APK ≤ 25 MB** → **GitHub** repository **`GothwadTech/storefiles`**
+     (slug exactly `storefiles`; Releases, one tag per `package@versionCode`).
    - **APK > 25 MB** → **Backblaze B2** (S3-compatible, private bucket,
      Worker-generated presigned PUT for upload). The "B2 vs GitHub" decision
      must be made from the APK byte size — `apkProviderForSize()` in
@@ -103,7 +103,7 @@ them away:
    currently `pawan`). The frontend's demo check mirrors this only for
    non-production hosts.
 9. **Secrets never in git/code.** `SUPABASE_SERVICE_ROLE_KEY`,
-   `IMGBB_API_KEY`, `GITHUB_FILES_TOKEN` (fine-grained, store-files repo only),
+   `IMGBB_API_KEY`, `GITHUB_FILES_TOKEN` (fine-grained, storefiles repo only),
    `B2_KEY_ID`, `B2_APP_KEY` — Worker secrets (dashboard or `wrangler secret
    put`) or `worker/.dev.vars` locally (git-ignored). Public values live in
    `worker/wrangler.toml` `[vars]` and root `.env.example` (Vite `VITE_*`).
@@ -125,7 +125,7 @@ store/
 │   ├── README.md          run order · idempotency rule · 600–1000 line file rule
 │   └── 01_StoreSchema.sql 12 tables + RLS + category seed (idempotent)
 ├── index.html             SPA entry (theme-color #212121)
-├── public/                manifest.json (PWA), icon.svg
+├── public/                manifest.json (PWA), icon.svg, _redirects (SPA fallback)
 ├── src/
 │   ├── main.tsx           React root (AppProvider wrapper)
 │   ├── App.tsx            hostname/mode selector + preview mode switcher
@@ -134,6 +134,7 @@ store/
 │   ├── data/seed.ts       demo catalog (8 apps, reviews, submissions, reports)
 │   ├── lib/
 │   │   ├── config.ts      domains, mode detection, OAuth client config
+│   │   ├── api.ts         Worker API client (store/dev/admin/uploads, upload flows)
 │   │   ├── auth.ts        Gothwad sign-in (PKCE), /api/me, demo session
 │   │   ├── storage.ts     provider routing (≤25MB GitHub / >25MB B2), image compression
 │   │   ├── router.ts      tiny path router (no react-router dependency)
@@ -147,7 +148,9 @@ store/
     ├── wrangler.toml      name="store", public [vars], routes documented inside
     ├── .dev.vars.example  local secret names (no values)
     ├── tsconfig.json
-    └── src/index.ts       the whole API (single file, read its header comment)
+    └── src/
+        ├── index.ts       the whole API (routes + Supabase CRUD, read its header)
+        └── apk.ts         APK manifest auto-read (ZIP + binary AndroidManifest.xml)
 ```
 
 **Stack (same as the Mail repo):** Vite + React 19 + TypeScript +
@@ -203,7 +206,7 @@ Indus/Play-Console-inspired professional layout:
 - **Reviews:** cross-app review inbox with public replies
 - **Developer profile settings** + read-only Gothwad Account identity card
 
-### 4.3 Admin (`admin.console.*`, `src/admin/AdminApp.tsx`)
+### 4.3 Admin (`storeadmin.*`, `src/admin/AdminApp.tsx`)
 - Gate: non-admin usernames get an explicit "Admin access required" screen
 - **Review queue:** pending submissions with provider/size/submitted info,
   reviewer note field — **Approve and publish** / **Reject** (reject blocked
@@ -218,14 +221,15 @@ Indus/Play-Console-inspired professional layout:
   `https://storeapp.gothwadtech.com`
 
 ### 4.5 Cross-cutting behavior (important to know before editing)
-- **State today is client-side.** `src/lib/AppContext.tsx` holds the whole
-  domain state (apps, releases, reviews, submissions, reports, wishlist,
-  library, developer) seeded from `src/data/seed.ts` and **persisted to
-  `localStorage` (`gothwad-store-state-v1`)**. Actions (create app, add
-  release, submit, admin approve/reject, review, reply, report, download
-  counting) are fully implemented there. This is deliberate for Phase 1
-  demo; §6.2 wires it to the API. If you change the shape of this state,
-  think about the localStorage migration.
+- **State is hybrid since Session 2.** `src/lib/AppContext.tsx` boot par
+  Worker se hydrate hota hai (`/api/store/apps` catalog → `/api/me` session →
+  dev/admin bundles, `src/lib/api.ts` client se) aur saari actions asal user
+  ke liye Worker API par jati hain. Backend **unconfigured** mile
+  (`source: "unconfigured"` / 503) to wahi purana raasta: `src/data/seed.ts`
+  se seed + `localStorage` (`gothwad-store-state-v1`) persistence + demo
+  actions. Live mode me localStorage me kuch persist nahi hota — Worker hi
+  source of truth hai. Demo user (`demo-user-1`) hamesha local mode me
+  rehta hai.
 - **Full demo loop works without any backend:** Demo sign-in (dev/preview
   only — the button is hidden on `*.gothwadtech.com` hosts; see
   `isProductionHost()` in `src/lib/auth.ts`, demo user `pawan`, which is
@@ -256,8 +260,11 @@ Base: each production site proxies/serves the same Worker at `/api/*`.
 | `GET /api/download/:releaseId` | ✅ records a `downloads` row, 302-redirects to the stored GitHub/B2 URL |
 | `POST /api/uploads/image` | ✅ proxies to ImgBB with the server-side key, returns `{provider, url, deleteUrl}` |
 | `POST /api/uploads/apk-ticket` | ✅ size rule: ≤25 MB → GitHub worker-upload mode; >25 MB → B2 presigned PUT (SigV4, 1 h) + public URL |
-| `POST /api/uploads/apk` | ✅ uploads ≤25 MB APK to GitHub `store-files` Releases (`package@versionCode` tag), returns CDN URL |
-| `/api/dev/*`, `/api/admin/*`, review/wishlist/report writes | 🚧 **Not implemented**: guarded (401 → admin 403 → 503 `supabase_not_configured`) and finally `501 not_implemented_yet`. This is the next backend task (§6.2). |
+| `POST /api/uploads/apk` | ✅ uploads ≤25 MB APK to GitHub `storefiles` Releases (`package@versionCode` tag), returns CDN URL |
+| `POST /api/store/apps/:id/reviews|wishlist|report|library`, `GET /api/store/library|wishlist` | ✅ Session 2: login-ke-baad wale user actions (ek user = ek review, rating Worker par recompute) |
+| `/api/dev/*` (register, apps CRUD + listing/screenshots, releases, submit, stats, reviews+reply) | ✅ Session 2: `sql/01` tables par, ownership + package-uniqueness + version-code-monotonic rules ke saath |
+| `/api/admin/*` (queue, approve/reject — note reject par mandatory, suspend/restore, feature, reports resolve) | ✅ Session 2: approve par ek hi live release + app published; purana live version naye review ke dauran chalta rehta hai |
+| `POST /api/uploads/apk-inspect` | ✅ Session 2: APK bina store kiye manifest auto-read (`worker/src/apk.ts`) + SHA-256 — console form auto-fill ke liye |
 
 Safety behavior to preserve: unknown routes `404 {error, message}`;
 Accounts/verify failures return JSON errors, never HTML; CORS only for the
@@ -272,6 +279,32 @@ messages in English.
 every table; public read is limited to published apps / screenshots /
 reviews / categories / featured, and all writes go through the Worker with
 the service-role key (which bypasses RLS). **No storage buckets.**
+
+### 4.8 Session 2 changes (2026-10-16) — admin domain + backend wiring
+
+- **Admin domain:** purana two-level admin domain →
+  **`storeadmin.gothwadtech.com`** har jagah (hostname detection, SITE_URLS,
+  `ADMIN_URL`, Worker routes, docs, OAuth redirect URI
+  `https://storeadmin.gothwadtech.com/auth/callback`). Final chaaro domains:
+  `store` · `console` · `storeadmin` · `storeapp` — sab one-level hain,
+  isiliye free Universal SSL kaafi hai (Total TLS ki zaroorat khatm).
+- **Worker CRUD implemented** (§4.6 wali table dekho) — 501 placeholder gaya.
+  Worker DB rows ko `types.ts` shapes me map karke deta hai (Android app ke
+  liye field naam wahi rakhe hain); raw `apk_url` browser ko kabhi nahi
+  jata, hamesha `/api/download/:releaseId` milta hai.
+- **Uploads asal me jude:** console images → `/api/uploads/image` (ImgBB,
+  browser-compressed), APK → ticket rule (≤25 MB Worker→GitHub, >25 MB B2
+  presigned direct PUT, progress ke saath), phir release CRUD se persist.
+  B2 upload ke baad Worker URL ko verify nahi karta — release create par
+  developer wahi `publicUrl` bhejta hai.
+- **APK manifest:** `worker/src/apk.ts` best-effort ZIP+binary-XML parser
+  (package/version/SDK/permissions) + SHA-256; fail ho to manual form fields
+  fallback hain, package mismatch Worker par 400 hai.
+- **`public/_redirects`** SPA fallback joda (Pages par refresh-404 khatm).
+- **Verify kiya gaya:** `npm run build` + worker typecheck pass; mock
+  Supabase/Accounts ke against poora Worker E2E aur synthetic APK
+  (stored+deflated dono) se manifest parser test pass. Asli Supabase/GitHub/
+  B2/ImgBB ke against live test owner ke §6.1 steps ke baad hi hoga.
 
 ---
 
@@ -311,7 +344,7 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
    and run `sql/01_StoreSchema.sql`.
 2. Register the `gothwad-store` client in **Accounts'** `ecosystem_apps`
    (redirect URIs for all four `/auth/callback`s + localhost).
-3. Create keys: ImgBB API key; GitHub fine-grained PAT for `store-files`;
+3. Create keys: ImgBB API key; GitHub fine-grained PAT for `storefiles`;
    Backblaze B2 private bucket + scoped key.
 4. Cloudflare Pages: connect this repo (`npm run build` → `dist`), attach
    all four custom domains.
@@ -321,7 +354,12 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
    live loop (console upload → admin approve → store download → install).
 
 ### 6.2 Next engineering tasks (for the next AI session)
-1. **Worker CRUD:** implement `/api/dev/*` (register developer, create app,
+
+> ✅ Items **1–4 Session 2 me ho gaye** (upar §4.8 dekho). Bache hue 5–8 hi
+> asal pending engineering hain; item 6 ka code hissa ready hai, phone par
+> live test §6.1 (owner steps) ke baad hoga.
+
+1. ~~**Worker CRUD:** implement `/api/dev/*` (register developer, create app,
    update listing, create release, submit-for-review, stats, reply) and
    `/api/admin/*` (queue, approve/reject with note, suspend/restore, reports,
    featuring) against the §4.7 schema, replacing the `501` placeholder.
@@ -330,16 +368,16 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
    reject-requires-note, one review per user per app (DB unique already),
    downloads dedupe (basic IP+app+day), rating aggregate update on review
    write. Keep English JSON errors `{error, message}`.
-2. **Frontend ↔ API wiring:** move `AppContext` reads/writes (public store
+2. ~~**Frontend ↔ API wiring:** move `AppContext` reads/writes (public store
    first, then console/admin) from local state to the Worker; keep seed data
    only as an unconfigured-backend fallback; map API responses to the
    existing `types.ts` shapes (the Android app depends on them too — do not
    rename fields casually).
-3. **Real uploads:** wire console image uploads to `POST /api/uploads/image`
+3. ~~**Real uploads:** wire console image uploads to `POST /api/uploads/image`
    (ImgBB) and APK flow to `apk-ticket`/`apk` (GitHub ≤25 MB via Worker;
    B2 presigned direct upload >25 MB) with progress; persist returned URLs
    through the CRUD endpoints from step 1.
-4. **APK manifest parsing** in the Worker (`worker/src/apk.ts` to be created):
+4. ~~**APK manifest parsing** in the Worker (`worker/src/apk.ts`):~~ (ban gaya hai —)
    best-effort extract package name, versionCode/name, min/target SDK and
    permissions from `AndroidManifest.xml` (APK = ZIP, binary XML); fall back
    to manual form fields; verify package matches the listing.
@@ -402,5 +440,5 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
 
 ---
 
-*End of handover. Next action for whoever reads this: if the PR above is
-merged, deployment is §6.1 (owner) and the next build task is §6.2 item 1.*
+*End of handover. Next action for whoever reads this: if the Session 2 PR is
+merged, deployment is §6.1 (owner) and the next build task is §6.2 item 5.*

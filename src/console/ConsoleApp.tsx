@@ -8,6 +8,8 @@ import { useApp } from '../lib/AppContext';
 import { usePath } from '../lib/router';
 import { AppIcon, Logo, SignInPrompt, StatusBadge, categoryName } from '../shared/ui';
 import { apkProviderForSize, compressImage, formatBytes, formatCount } from '../lib/storage';
+import { inspectApk, uploadApk, uploadImage } from '../lib/api';
+import type { ApkManifestInfo, UploadedApk } from '../lib/api';
 import type { StoreApp as StoreAppType } from '../types';
 
 // ── Design tokens (dark, neutral #212121 - Material-style console) ──
@@ -162,7 +164,7 @@ function Onboarding() {
         ))}
       </div>
       <Card title="Create your developer profile" desc="This is shown publicly on your app listings. You only need to do this once — there is no registration fee.">
-        <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); registerDeveloper(form); navigate('/'); }}>
+        <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); void registerDeveloper(form).then(() => navigate('/')).catch((err: Error) => alert(err.message)); }}>
           <div className="grid gap-5 sm:grid-cols-2">
             <div><label className={labelCls}>Your name</label><input required value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} className={inputCls} placeholder="Jane Doe" /></div>
             <div><label className={labelCls}>Developer / organization name</label><input required value={form.orgName} onChange={(e) => setForm({ ...form, orgName: e.target.value })} className={inputCls} placeholder="Acme Studios" /><p className={hintCls}>Shown as the publisher name on the store.</p></div>
@@ -268,7 +270,7 @@ function CreateApp({ navigate }: { navigate: (p: string) => void }) {
       <PageHeader title="Create app" desc="Start a new listing. You can complete the store listing and upload your APK in the next step." />
       <div className="grid items-start gap-5 lg:grid-cols-[1fr_320px]">
         <Card>
-          <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); const a = createApp({ name, packageName: pkg, category, kind }); navigate(`/apps/${a.id}`); }}>
+          <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); void createApp({ name, packageName: pkg, category, kind }).then((a) => navigate(`/apps/${a.id}`)).catch((err: Error) => alert(err.message)); }}>
             <div><label className={labelCls}>App name</label><input required value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="My Awesome App" /></div>
             <div>
               <label className={labelCls}>Package name</label>
@@ -303,13 +305,16 @@ function CreateApp({ navigate }: { navigate: (p: string) => void }) {
 
 // ════════════════ APP DETAIL (listing / releases / reviews) ════════════════
 function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: string) => void; tab: 'listing' | 'releases' | 'reviews' }) {
-  const { updateApp, categories, releases, addRelease, submitForReview, submissions, reviews, replyReview, setAppStatus, liveReleaseOf } = useApp();
+  const { updateApp, categories, releases, addRelease, submitForReview, submissions, reviews, replyReview, setAppStatus, liveReleaseOf, backendLive, isDemoUser } = useApp();
+  const apiMode = backendLive && !isDemoUser;
   const [form, setForm] = useState(app);
   const [iconName, setIconName] = useState('');
   const [shots, setShots] = useState<string[]>(app.screenshots);
-  const [apk, setApk] = useState<{ name: string; size: number } | null>(null);
+  const [apk, setApk] = useState<{ name: string; size: number; file: File; manifest?: ApkManifestInfo | null } | null>(null);
   const [ver, setVer] = useState({ versionName: '', versionCode: '', changelog: '' });
   const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [replyDraft, setReplyDraft] = useState<Record<string, string>>({});
   const appReleases = releases.filter((r) => r.appId === app.id).sort((a, b) => b.versionCode - a.versionCode);
   const appReviews = reviews.filter((r) => r.appId === app.id);
@@ -318,10 +323,40 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
 
   const onImage = async (file: File | undefined, target: 'icon' | 'shot') => {
     if (!file) return;
-    const small = await compressImage(file, target === 'icon' ? 512 : 1080);
-    const url = URL.createObjectURL(small); // Production: Worker uploads to ImgBB and returns the URL.
-    if (target === 'icon') { setForm((f) => ({ ...f, iconUrl: url })); setIconName(file.name); }
-    else setShots((s) => [...s, url].slice(0, 8));
+    setError('');
+    try {
+      const small = await compressImage(file, target === 'icon' ? 512 : 1080);
+      // Live mode: Worker uploads the image to ImgBB. Demo/offline: local preview only.
+      const url = apiMode ? await uploadImage(small, file.name) : URL.createObjectURL(small);
+      if (target === 'icon') { setForm((f) => ({ ...f, iconUrl: url })); setIconName(file.name); }
+      else setShots((s) => [...s, url].slice(0, 8));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Image upload failed');
+    }
+  };
+
+  const onApkFile = async (file: File | undefined) => {
+    if (!file) return;
+    setError('');
+    setApk({ name: file.name, size: file.size, file });
+    if (!apiMode) return;
+    try {
+      // Manifest auto-read: package, version, SDK and permissions fill themselves in.
+      const { manifest } = await inspectApk(file);
+      setApk({ name: file.name, size: file.size, file, manifest });
+      if (manifest.packageName && manifest.packageName !== app.packageName) {
+        setError(`This APK is for ${manifest.packageName}, but this listing is ${app.packageName}. Upload the correct APK.`);
+        return;
+      }
+      setVer((v) => ({
+        ...v,
+        versionName: manifest.versionName ?? v.versionName,
+        versionCode: manifest.versionCode ? String(manifest.versionCode) : v.versionCode,
+      }));
+      if (manifest.versionName || manifest.versionCode) setMsg('APK details were read automatically from the file. You can still edit them below.');
+    } catch {
+      setMsg('The APK manifest could not be read automatically. Enter the version details manually - an admin will verify them during review.');
+    }
   };
 
   const tabs: [typeof tab, string][] = [['listing', 'Store listing'], ['releases', `Releases`], ['reviews', `Reviews`]];
@@ -336,14 +371,15 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
           <p className="truncate text-[13px] text-neutral-500">{app.packageName} · {categoryName(app.category)}{live ? ` · v${live.versionName} live` : ''}</p>
         </div>
         <StatusBadge status={app.status} />
-        {app.status === 'published' && <button onClick={() => setAppStatus(app.id, 'unlisted')} className={btnGhost}>Unpublish</button>}
-        {app.status === 'unlisted' && <button onClick={() => setAppStatus(app.id, 'published')} className={btnPrimary}>Publish again</button>}
+        {app.status === 'published' && <button onClick={() => { void setAppStatus(app.id, 'unlisted').catch((err: Error) => setError(err.message)); }} className={btnGhost}>Unpublish</button>}
+        {app.status === 'unlisted' && <button onClick={() => { void setAppStatus(app.id, 'published').catch((err: Error) => setError(err.message)); }} className={btnPrimary}>Publish again</button>}
       </div>
 
       {rejected?.note && app.status === 'draft' && (
         <p className="mb-5 rounded-xl border border-red-400/25 bg-red-500/[0.08] px-4 py-3 text-sm text-red-200"><b>Reviewer note:</b> {rejected.note}</p>
       )}
       {msg && <p className="mb-5 flex gap-2 rounded-xl border border-emerald-400/25 bg-emerald-500/[0.08] px-4 py-3 text-sm text-emerald-200"><CheckCircle2 size={18} className="shrink-0" /> {msg}</p>}
+      {error && <p className="mb-5 rounded-xl border border-red-400/25 bg-red-500/[0.08] px-4 py-3 text-sm text-red-200"><b>Error:</b> {error}</p>}
 
       <div className="mb-6 flex gap-1 border-b border-white/[0.08]">
         {tabs.map(([t, l]) => (
@@ -356,7 +392,7 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
       </div>
 
       {tab === 'listing' && (
-        <form onSubmit={(e) => { e.preventDefault(); updateApp(app.id, { ...form, screenshots: shots }); setMsg('Store listing saved. Text and image changes go live immediately; APKs always require review.'); }}>
+        <form onSubmit={(e) => { e.preventDefault(); setError(''); void updateApp(app.id, { ...form, screenshots: shots }).then(() => setMsg('Store listing saved. Text and image changes go live immediately; APKs always require review.')).catch((err: Error) => setError(err.message)); }}>
           <div className="space-y-5">
             <Card title="App details" desc="How your app appears on Gothwad Store.">
               <div className="space-y-5">
@@ -418,25 +454,59 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
 
       {tab === 'releases' && (
         <div className="space-y-5">
-          <Card title="Upload a new release" desc="APK files up to 25 MB are stored on GitHub (store-files). Larger APKs go to Backblaze B2.">
+          <Card title="Upload a new release" desc="APK files up to 25 MB are stored on GitHub (storefiles). Larger APKs go to Backblaze B2.">
             <form className="space-y-5" onSubmit={(e) => {
               e.preventDefault(); if (!apk) return;
-              const rel = addRelease(app.id, { versionName: ver.versionName, versionCode: Number(ver.versionCode), sizeBytes: apk.size, changelog: ver.changelog, permissions: ['android.permission.INTERNET'], apkName: apk.name });
-              setMsg(`Release v${rel.versionName} created (${formatBytes(apk.size)} → ${apkProviderForSize(apk.size) === 'github' ? 'GitHub · store-files' : 'Backblaze B2'}). Submit it for review below.`);
-              setApk(null);
+              setError('');
+              void (async () => {
+                try {
+                  let uploaded: UploadedApk | undefined;
+                  if (apiMode) {
+                    if (apk.manifest?.packageName && apk.manifest.packageName !== app.packageName) {
+                      throw new Error(`This APK is for ${apk.manifest.packageName}, but this listing is ${app.packageName}.`);
+                    }
+                    // Ticket rule inside uploadApk: <=25 MB GitHub via Worker, >25 MB B2 presigned direct.
+                    setUploadPct(0);
+                    uploaded = await uploadApk(apk.file, app, Number(ver.versionCode), (f) => setUploadPct(Math.round(f * 100)));
+                    setUploadPct(null);
+                  }
+                  const rel = await addRelease(app.id, {
+                    versionName: ver.versionName, versionCode: Number(ver.versionCode), sizeBytes: apk.size,
+                    changelog: ver.changelog, permissions: apk.manifest?.permissions?.length ? apk.manifest.permissions : ['android.permission.INTERNET'],
+                    apkName: apk.name, apkUrl: uploaded?.url, apkProvider: uploaded?.provider, apkKey: uploaded?.key,
+                    apkSha256: uploaded?.sha256, manifest: uploaded?.manifest ?? apk.manifest ?? undefined,
+                  });
+                  setMsg(`Release v${rel.versionName} created (${formatBytes(apk.size)} → ${apkProviderForSize(apk.size) === 'github' ? 'GitHub · storefiles' : 'Backblaze B2'}). Submit it for review below.`);
+                  setApk(null);
+                } catch (err) {
+                  setUploadPct(null);
+                  setError(err instanceof Error ? err.message : 'Release creation failed');
+                }
+              })();
             }}>
               <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed border-white/20 bg-[#242424] px-4 py-9 text-center transition hover:border-emerald-500/50">
                 <UploadCloud size={30} className="text-emerald-400" />
                 <span className="text-sm font-medium text-white">{apk ? `${apk.name} · ${formatBytes(apk.size)}` : 'Choose an APK file or drop it here'}</span>
-                <span className="text-xs text-neutral-500">{apk ? (apkProviderForSize(apk.size) === 'github' ? 'Will be stored on GitHub (store-files) — ≤25 MB rule' : 'Will be stored on Backblaze B2 — >25 MB rule') : 'Signed release APK built with your release keystore'}</span>
-                <input type="file" accept=".apk,application/vnd.android.package-archive" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setApk({ name: f.name, size: f.size }); }} />
+                <span className="text-xs text-neutral-500">{apk ? (apkProviderForSize(apk.size) === 'github' ? 'Will be stored on GitHub (storefiles) — ≤25 MB rule' : 'Will be stored on Backblaze B2 — >25 MB rule') : 'Signed release APK built with your release keystore'}</span>
+                <input type="file" accept=".apk,application/vnd.android.package-archive" className="hidden" onChange={(e) => { void onApkFile(e.target.files?.[0]); }} />
               </label>
               <div className="grid gap-5 sm:grid-cols-2">
                 <div><label className={labelCls}>Version name</label><input required value={ver.versionName} onChange={(e) => setVer({ ...ver, versionName: e.target.value })} className={inputCls} placeholder="1.0.0" /></div>
                 <div><label className={labelCls}>Version code</label><input required type="number" min={1} value={ver.versionCode} onChange={(e) => setVer({ ...ver, versionCode: e.target.value })} className={inputCls} placeholder="1" /><p className={hintCls}>Integer that increases with every release.</p></div>
               </div>
+              {apk?.manifest && (apk.manifest.minSdk || apk.manifest.permissions.length > 0) && (
+                <p className="rounded-lg bg-white/[0.04] px-3 py-2 text-xs leading-relaxed text-neutral-400">
+                  Read from APK: package <span className="text-neutral-200">{apk.manifest.packageName ?? app.packageName}</span>
+                  {apk.manifest.minSdk ? <> · min Android SDK {apk.manifest.minSdk}</> : null}
+                  {apk.manifest.targetSdk ? <> · target SDK {apk.manifest.targetSdk}</> : null}
+                  {apk.manifest.permissions.length ? <> · {apk.manifest.permissions.length} permissions</> : null}
+                </p>
+              )}
               <div><label className={labelCls}>Release notes</label><textarea rows={3} value={ver.changelog} onChange={(e) => setVer({ ...ver, changelog: e.target.value })} className={inputCls} placeholder="What is new in this version?" /></div>
-              <div className="flex justify-end border-t border-white/[0.06] pt-4"><button disabled={!apk} className={btnPrimary}><FileUp size={16} /> Create release</button></div>
+              <div className="flex items-center justify-end gap-3 border-t border-white/[0.06] pt-4">
+                {uploadPct !== null && <span className="text-xs text-neutral-400">Uploading APK… {uploadPct}%</span>}
+                <button disabled={!apk || uploadPct !== null} className={btnPrimary}><FileUp size={16} /> Create release</button>
+              </div>
             </form>
           </Card>
 
@@ -457,7 +527,7 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
                       <td className="px-3 py-3 text-right text-neutral-300">{formatCount(r.downloads)}</td>
                       <td className="px-3 py-3 text-right">
                         {r.reviewStatus === 'pending' && app.status !== 'in_review'
-                          ? <button onClick={() => { submitForReview(app.id, r.id); setMsg('Submitted for review. Once an admin approves it, this version will go live.'); }} className="rounded-lg bg-amber-500 px-3.5 py-1.5 text-xs font-semibold text-black transition hover:bg-amber-400">Submit for review</button>
+                          ? <button onClick={() => { setError(''); void submitForReview(app.id, r.id).then(() => setMsg('Submitted for review. Once an admin approves it, this version will go live.')).catch((err: Error) => setError(err.message)); }} className="rounded-lg bg-amber-500 px-3.5 py-1.5 text-xs font-semibold text-black transition hover:bg-amber-400">Submit for review</button>
                           : <span className="text-xs text-neutral-600">—</span>}
                       </td>
                     </tr>))}
@@ -482,7 +552,7 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
               <p className="mt-2.5 text-sm leading-relaxed text-neutral-300">{r.body}</p>
               {r.developerReply
                 ? <p className="mt-3 rounded-lg bg-[#242424] px-3.5 py-2.5 text-[13px] text-neutral-300"><b className="text-emerald-300">Your reply: </b>{r.developerReply}</p>
-                : <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); replyReview(r.id, replyDraft[r.id] ?? ''); }}>
+                : <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); void replyReview(r.id, replyDraft[r.id] ?? '').catch((err: Error) => alert(err.message)); }}>
                     <input value={replyDraft[r.id] ?? ''} onChange={(e) => setReplyDraft({ ...replyDraft, [r.id]: e.target.value })} placeholder="Reply as the developer…" className={inputCls} />
                     <button className={`${btnPrimary} shrink-0`}>Reply</button>
                   </form>}
@@ -543,7 +613,7 @@ function ReviewsPage() {
             <p className="text-xs text-neutral-500">{a?.name} · <span className="font-medium text-neutral-300">@{r.username}</span></p>
             <p className="mt-1.5 text-sm leading-relaxed text-neutral-200">{r.body}</p>
             {!r.developerReply
-              ? <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); replyReview(r.id, draft[r.id] ?? ''); }}><input value={draft[r.id] ?? ''} onChange={(e) => setDraft({ ...draft, [r.id]: e.target.value })} className={inputCls} placeholder="Write a public reply…" /><button className={`${btnPrimary} shrink-0`}>Reply</button></form>
+              ? <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); void replyReview(r.id, draft[r.id] ?? '').catch((err: Error) => alert(err.message)); }}><input value={draft[r.id] ?? ''} onChange={(e) => setDraft({ ...draft, [r.id]: e.target.value })} className={inputCls} placeholder="Write a public reply…" /><button className={`${btnPrimary} shrink-0`}>Reply</button></form>
               : <p className="mt-2.5 text-[13px] text-neutral-400"><b className="text-emerald-300">You: </b>{r.developerReply}</p>}
           </section>);})}
         {!mine.length && <Card><p className="py-8 text-center text-sm text-neutral-500">No reviews yet.</p></Card>}
@@ -562,7 +632,7 @@ function SettingsPage() {
       <PageHeader title="Developer profile" desc="Public publisher information shown on your listings." />
       <div className="space-y-5">
         <Card title="Profile">
-          <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); registerDeveloper(form); setSaved(true); }}>
+          <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); void registerDeveloper(form).then(() => setSaved(true)).catch((err: Error) => alert(err.message)); }}>
             <div className="grid gap-5 sm:grid-cols-2">
               <div><label className={labelCls}>Name</label><input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} className={inputCls} required /></div>
               <div><label className={labelCls}>Organization name</label><input value={form.orgName} onChange={(e) => setForm({ ...form, orgName: e.target.value })} className={inputCls} required /></div>
