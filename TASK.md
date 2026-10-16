@@ -1,6 +1,6 @@
 # 📋 TASK.md — Gothwad Store live status
 
-**Last updated:** 2026-10-16 · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
+**Last updated:** 2026-10-16 · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
 
 ## ✅ Ho gaya (Session 1 — 2026-10-16)
 

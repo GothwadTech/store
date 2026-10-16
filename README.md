@@ -18,6 +18,7 @@ me hai — backend (Worker API) **yehi** hai.
 
 | File | Kya milega |
 |------|-----------|
+| [`HANDOVER.md`](HANDOVER.md) | 🤖 **Naya AI/session? SABSE PEHLE YEH PADHO** — poora context, pakke faisle, kya bana/baaki |
 | [`PLAN.md`](PLAN.md) | Poora design — architecture, storage rules, phases |
 | [`TASK.md`](TASK.md) | Live status — kya bana, kya baaki |
 | [`docs/SETUP.md`](docs/SETUP.md) | Step-by-step deploy (Supabase → Accounts → Cloudflare) |
