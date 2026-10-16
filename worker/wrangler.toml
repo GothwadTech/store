@@ -21,15 +21,15 @@ AUTH_HUB_URL = "https://api.gothwadtech.com"
 AUTH_SIGNIN_URL = "https://accounts.gothwadtech.com"
 OAUTH_CLIENT_ID = "gothwad-store"
 # Store ke APNE Supabase project ka URL (Accounts/Mail se alag) - yahan asal URL dalo
-SUPABASE_URL = ""
+SUPABASE_URL = "https://hovlmfkwpdusrvkcdbjl.supabase.co"
 # Admin ke Accounts usernames (comma separated)
 ADMIN_USERNAMES = "pawan"
 # GitHub storefiles repo (APK <=25MB yahi jayega)
 GITHUB_FILES_OWNER = "GothwadTech"
 GITHUB_FILES_REPO = "storefiles"
 # Backblaze B2 (APK >25MB) - S3 compatible endpoint + bucket
-B2_S3_ENDPOINT = ""
-B2_BUCKET = ""
+B2_S3_ENDPOINT = "https://s3.us-east-005.backblazeb2.com"
+B2_BUCKET = "gothwad-store-apks"
 B2_PUBLIC_BASE = ""
 ALLOWED_ORIGINS = ""
 
