@@ -1,0 +1,13 @@
+{
+  "name": "Gothwad Store",
+  "short_name": "Gothwad Store",
+  "description": "Discover and download Gothwad ecosystem apps",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#212121",
+  "theme_color": "#212121",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
