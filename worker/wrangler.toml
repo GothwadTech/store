@@ -1,0 +1,46 @@
+# =============================================================================
+# GOTHWAD STORE WORKER - Cloudflare Wrangler Configuration
+# Deploy:  npm run worker:deploy
+# Local:   npm run worker:dev     (http://127.0.0.1:8787)
+# =============================================================================
+# Dashboard ke Worker ka naam isse MATCH hona chahiye: "store" (rename mat karo)
+name = "store"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+keep_vars = true
+
+# ── PUBLIC VARIABLES (secret nahi) ──────────────────────────────────
+[vars]
+APP_DOMAIN = "gothwadtech.com"
+STORE_URL = "https://store.gothwadtech.com"
+CONSOLE_URL = "https://console.gothwadtech.com"
+ADMIN_URL = "https://admin.console.gothwadtech.com"
+STOREAPP_URL = "https://storeapp.gothwadtech.com"
+# Server-side Accounts calls ka base (Custom Domain host - same-zone rule, Mail wala lesson)
+AUTH_HUB_URL = "https://api.gothwadtech.com"
+AUTH_SIGNIN_URL = "https://accounts.gothwadtech.com"
+OAUTH_CLIENT_ID = "gothwad-store"
+# Store ke APNE Supabase project ka URL (Accounts/Mail se alag) - yahan asal URL dalo
+SUPABASE_URL = ""
+# Admin ke Accounts usernames (comma separated)
+ADMIN_USERNAMES = "pawan"
+# GitHub store-files repo (APK <=25MB yahi jayega)
+GITHUB_FILES_OWNER = "GothwadTech"
+GITHUB_FILES_REPO = "store-files"
+# Backblaze B2 (APK >25MB) - S3 compatible endpoint + bucket
+B2_S3_ENDPOINT = ""
+B2_BUCKET = ""
+B2_PUBLIC_BASE = ""
+ALLOWED_ORIGINS = ""
+
+# ── SECRETS (yahan kabhi mat likho - dashboard/wrangler secret put) ─
+#   SUPABASE_SERVICE_ROLE_KEY   Store wale Supabase project ki (sirf Worker me)
+#   IMGBB_API_KEY               saari images ke liye
+#   GITHUB_FILES_TOKEN          sirf store-files repo ka fine-grained PAT
+#   B2_KEY_ID / B2_APP_KEY      Backblaze B2 application key
+
+# ── ROUTES (dashboard me lagana hai - docs/SETUP.md) ────────────────
+#   store.gothwadtech.com/api/*          -> yeh Worker
+#   console.gothwadtech.com/api/*        -> yeh Worker
+#   admin.console.gothwadtech.com/api/*  -> yeh Worker
+#   storeapp.gothwadtech.com/api/*       -> yeh Worker
