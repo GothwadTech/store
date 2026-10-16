@@ -1,0 +1,4 @@
+# Cloudflare Pages SPA fallback: andar ke pages (/app/..., /apps/:id, /auth/callback)
+# refresh par 404 na dein - sab kuch index.html ko do, router client par chalega.
+# /api/* yahan NAHI aata - wo Worker routes se serve hota hai.
+/*    /index.html    200
