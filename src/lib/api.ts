@@ -193,7 +193,7 @@ export async function inspectApk(file: File): Promise<{ manifest: ApkManifestInf
 
 /**
  * Poora APK upload flow (pakka rule):
- *  ≤25 MB → Worker se GitHub store-files;  >25 MB → B2 presigned PUT (direct).
+ *  ≤25 MB → Worker se GitHub storefiles;  >25 MB → B2 presigned PUT (direct).
  * onProgress(0..1) dono raaston par best-effort milta hai.
  */
 export async function uploadApk(
@@ -221,7 +221,7 @@ export async function uploadApk(
     return { provider: 'b2', url: ticket.publicUrl ?? ticket.uploadUrl.split('?')[0], key: ticket.key ?? '', sizeBytes: file.size };
   }
 
-  // GitHub raasta: Worker khud store-files Releases me daalta hai.
+  // GitHub raasta: Worker khud storefiles Releases me daalta hai.
   const form = new FormData();
   form.append('file', file, file.name);
   form.append('packageName', app.packageName);

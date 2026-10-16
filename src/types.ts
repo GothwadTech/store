@@ -21,7 +21,7 @@ export interface AppRelease {
   appId: string;
   versionCode: number;
   versionName: string;
-  /** APK kahan hai - rule: <=25MB github (store-files repo), >25MB Backblaze B2 */
+  /** APK kahan hai - rule: <=25MB github (storefiles repo), >25MB Backblaze B2 */
   apkProvider: Extract<StorageProvider, 'github' | 'b2'>;
   apkKey: string;
   apkUrl: string;

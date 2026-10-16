@@ -1,5 +1,5 @@
 // ── File storage routing (PLAN SS6 - pakka faisla) ───────────────────
-// Sirf 3 providers: ImgBB (images) · GitHub store-files (APK <=25MB) · Backblaze B2 (>25MB)
+// Sirf 3 providers: ImgBB (images) · GitHub storefiles (APK <=25MB) · Backblaze B2 (>25MB)
 // Supabase Storage BILKUL NAHI - Supabase sirf database (500MB metadata) ke liye hai.
 export const APK_GITHUB_LIMIT_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -9,7 +9,7 @@ export function apkProviderForSize(sizeBytes: number): 'github' | 'b2' {
 
 export function apkProviderLabel(sizeBytes: number): string {
   return apkProviderForSize(sizeBytes) === 'github'
-    ? 'GitHub · store-files repository (≤25 MB rule)'
+    ? 'GitHub · storefiles repository (≤25 MB rule)'
     : 'Backblaze B2 (>25 MB rule)';
 }
 

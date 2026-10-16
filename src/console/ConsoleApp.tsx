@@ -454,7 +454,7 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
 
       {tab === 'releases' && (
         <div className="space-y-5">
-          <Card title="Upload a new release" desc="APK files up to 25 MB are stored on GitHub (store-files). Larger APKs go to Backblaze B2.">
+          <Card title="Upload a new release" desc="APK files up to 25 MB are stored on GitHub (storefiles). Larger APKs go to Backblaze B2.">
             <form className="space-y-5" onSubmit={(e) => {
               e.preventDefault(); if (!apk) return;
               setError('');
@@ -476,7 +476,7 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
                     apkName: apk.name, apkUrl: uploaded?.url, apkProvider: uploaded?.provider, apkKey: uploaded?.key,
                     apkSha256: uploaded?.sha256, manifest: uploaded?.manifest ?? apk.manifest ?? undefined,
                   });
-                  setMsg(`Release v${rel.versionName} created (${formatBytes(apk.size)} → ${apkProviderForSize(apk.size) === 'github' ? 'GitHub · store-files' : 'Backblaze B2'}). Submit it for review below.`);
+                  setMsg(`Release v${rel.versionName} created (${formatBytes(apk.size)} → ${apkProviderForSize(apk.size) === 'github' ? 'GitHub · storefiles' : 'Backblaze B2'}). Submit it for review below.`);
                   setApk(null);
                 } catch (err) {
                   setUploadPct(null);
@@ -487,7 +487,7 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
               <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed border-white/20 bg-[#242424] px-4 py-9 text-center transition hover:border-emerald-500/50">
                 <UploadCloud size={30} className="text-emerald-400" />
                 <span className="text-sm font-medium text-white">{apk ? `${apk.name} · ${formatBytes(apk.size)}` : 'Choose an APK file or drop it here'}</span>
-                <span className="text-xs text-neutral-500">{apk ? (apkProviderForSize(apk.size) === 'github' ? 'Will be stored on GitHub (store-files) — ≤25 MB rule' : 'Will be stored on Backblaze B2 — >25 MB rule') : 'Signed release APK built with your release keystore'}</span>
+                <span className="text-xs text-neutral-500">{apk ? (apkProviderForSize(apk.size) === 'github' ? 'Will be stored on GitHub (storefiles) — ≤25 MB rule' : 'Will be stored on Backblaze B2 — >25 MB rule') : 'Signed release APK built with your release keystore'}</span>
                 <input type="file" accept=".apk,application/vnd.android.package-archive" className="hidden" onChange={(e) => { void onApkFile(e.target.files?.[0]); }} />
               </label>
               <div className="grid gap-5 sm:grid-cols-2">

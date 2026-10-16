@@ -21,7 +21,7 @@ id dobara nahi milegi.
 
 | APK size | Kahan jayegi |
 |----------|-------------|
-| ≤ 25 MB | GitHub (`store-files` repo ke Releases) |
+| ≤ 25 MB | GitHub (`storefiles` repo ke Releases) |
 | > 25 MB | Backblaze B2 |
 
 Version name (`1.0.0`) + badhta hua version code (`1`, `2`, `3`...) +

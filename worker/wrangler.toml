@@ -24,9 +24,9 @@ OAUTH_CLIENT_ID = "gothwad-store"
 SUPABASE_URL = ""
 # Admin ke Accounts usernames (comma separated)
 ADMIN_USERNAMES = "pawan"
-# GitHub store-files repo (APK <=25MB yahi jayega)
+# GitHub storefiles repo (APK <=25MB yahi jayega)
 GITHUB_FILES_OWNER = "GothwadTech"
-GITHUB_FILES_REPO = "store-files"
+GITHUB_FILES_REPO = "storefiles"
 # Backblaze B2 (APK >25MB) - S3 compatible endpoint + bucket
 B2_S3_ENDPOINT = ""
 B2_BUCKET = ""
@@ -36,7 +36,7 @@ ALLOWED_ORIGINS = ""
 # ── SECRETS (yahan kabhi mat likho - dashboard/wrangler secret put) ─
 #   SUPABASE_SERVICE_ROLE_KEY   Store wale Supabase project ki (sirf Worker me)
 #   IMGBB_API_KEY               saari images ke liye
-#   GITHUB_FILES_TOKEN          sirf store-files repo ka fine-grained PAT
+#   GITHUB_FILES_TOKEN          sirf storefiles repo ka fine-grained PAT
 #   B2_KEY_ID / B2_APP_KEY      Backblaze B2 application key
 
 # ── ROUTES (dashboard me lagana hai - docs/SETUP.md) ────────────────

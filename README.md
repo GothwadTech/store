@@ -39,7 +39,7 @@ local/preview par dikhta hai). Asli login = **Sign in with Gothwad**
 ## 💾 Storage ke pakke niyam
 
 - **Images** (icon/screenshots/logo) → **ImgBB** sirf
-- **APK ≤ 25 MB** → **GitHub** repo `GothwadTech/store-files` (Releases)
+- **APK ≤ 25 MB** → **GitHub** repo `GothwadTech/storefiles` (Releases)
 - **APK > 25 MB** → **Backblaze B2**
 - **Supabase** → sirf database (500 MB metadata). Storage bucket **nahi** banta.
 

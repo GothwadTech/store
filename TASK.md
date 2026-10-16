@@ -26,6 +26,11 @@
 
 ## ✅ Session 2 (2026-10-16) — Admin domain + asli backend wiring
 
+- [x] **APK GitHub repo ka naam theek kiya:** asal repo naam `storefiles` hai
+      (bina dash ke) — `GITHUB_FILES_REPO = "storefiles"` (wrangler.toml)
+      sahit codebase ke saare repo-name references `store-files` →
+      `storefiles`. (File paths/technical dashes ko haath nahi lagaya;
+      `sql/` me repo naam tha hi nahi — wahan provider value `github` hai.)
 - [x] **Admin domain badla:** purana two-level admin domain →
       `storeadmin.gothwadtech.com` har jagah (config.ts hostname detection +
       SITE_URLS, wrangler.toml ADMIN_URL + routes, saari docs). Chaaro final
@@ -60,7 +65,7 @@
 - [ ] Accounts ke `ecosystem_apps` me `gothwad-store` register karo (SETUP §2;
       chaaro `/auth/callback` redirect URIs, admin wala
       `https://storeadmin.gothwadtech.com/auth/callback` sahit)
-- [ ] GitHub repo `GothwadTech/store-files` (owner bana raha hai) + PAT
+- [ ] GitHub repo `GothwadTech/storefiles` (owner bana raha hai) + PAT
 - [ ] Backblaze B2 bucket + key · ImgBB API key
 - [ ] Cloudflare: Pages project (4 custom domains) + Worker `store` (4 routes)
 - [ ] Live test: console upload → admin approve → store download → phone install

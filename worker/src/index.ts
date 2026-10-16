@@ -6,7 +6,7 @@
 // Pakke niyam (PLAN.md):
 //  · Supabase = Store ka APNA project, SIRF database (Storage bilkul nahi)
 //  · Images  -> ImgBB            (IMGBB_API_KEY)
-//  · APK <=25MB -> GitHub store-files repo   (GITHUB_FILES_TOKEN)
+//  · APK <=25MB -> GitHub storefiles repo   (GITHUB_FILES_TOKEN)
 //  · APK  >25MB -> Backblaze B2 (S3 API)     (B2_KEY_ID/B2_APP_KEY)
 //  · Login   -> Gothwad Accounts OAuth/cookie (khud ka password system NAHI)
 //  · SERVICE ROLE KEY sirf yahi rahegi, frontend me kabhi nahi
@@ -306,7 +306,7 @@ async function b2PresignedPut(env: Env, key: string, expiresSec = 3600): Promise
   return `${endpoint}/${env.B2_BUCKET}/${encodedKey}?${params}&X-Amz-Signature=${signature}`;
 }
 
-// ── GitHub store-files upload (APK <=25MB - Worker khud karega) ─────
+// ── GitHub storefiles upload (APK <=25MB - Worker khud karega) ─────
 async function githubUploadApk(env: Env, packageName: string, versionCode: number, fileName: string, bytes: ArrayBuffer): Promise<string> {
   const base = `https://api.github.com/repos/${env.GITHUB_FILES_OWNER}/${env.GITHUB_FILES_REPO}`;
   const headers = {
@@ -571,7 +571,7 @@ export default {
         }
 
         if (path === '/api/uploads/apk' && req.method === 'POST') {
-          // GitHub wala raasta: chhoti APK Worker ke through store-files Releases me
+          // GitHub wala raasta: chhoti APK Worker ke through storefiles Releases me
           if (!env.GITHUB_FILES_TOKEN) return out(err('github_not_configured', 'GITHUB_FILES_TOKEN is not configured', 503));
           const form = await req.formData();
           const file = form.get('file') as File | null;

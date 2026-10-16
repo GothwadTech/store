@@ -35,7 +35,7 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
 | Provider | Kya banana hai | Kya milega |
 |----------|---------------|-----------|
 | **ImgBB** | imgbb.com par account → api.imgbb.com se key | `IMGBB_API_KEY` |
-| **GitHub** | Public repo **`GothwadTech/store-files`** → Settings → Developer settings → Fine-grained PAT (sirf is repo, Contents+Releases write) | `GITHUB_FILES_TOKEN` |
+| **GitHub** | Public repo **`GothwadTech/storefiles`** → Settings → Developer settings → Fine-grained PAT (sirf is repo, Contents+Releases write) | `GITHUB_FILES_TOKEN` |
 | **Backblaze B2** | backblaze.com → B2 Cloud Storage → private bucket (e.g. `gothwad-store-apks`) → App Keys (bucket-scoped) | `B2_KEY_ID`, `B2_APP_KEY`, bucket ka S3 endpoint (`s3.<region>.backblazeb2.com`) |
 
 ## Step 4 — Cloudflare Pages (chaaro sites, ek project)

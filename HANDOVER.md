@@ -74,8 +74,8 @@ them away:
      Because ImgBB has no on-the-fly transforms, images are resized/compressed
      **in the browser before upload** (`compressImage()` in `src/lib/storage.ts`).
      Cloudinary was considered and explicitly rejected by the owner.
-   - **APK ≤ 25 MB** → **GitHub** repository **`GothwadTech/store-files`**
-     (slug exactly `store-files`; Releases, one tag per `package@versionCode`).
+   - **APK ≤ 25 MB** → **GitHub** repository **`GothwadTech/storefiles`**
+     (slug exactly `storefiles`; Releases, one tag per `package@versionCode`).
    - **APK > 25 MB** → **Backblaze B2** (S3-compatible, private bucket,
      Worker-generated presigned PUT for upload). The "B2 vs GitHub" decision
      must be made from the APK byte size — `apkProviderForSize()` in
@@ -103,7 +103,7 @@ them away:
    currently `pawan`). The frontend's demo check mirrors this only for
    non-production hosts.
 9. **Secrets never in git/code.** `SUPABASE_SERVICE_ROLE_KEY`,
-   `IMGBB_API_KEY`, `GITHUB_FILES_TOKEN` (fine-grained, store-files repo only),
+   `IMGBB_API_KEY`, `GITHUB_FILES_TOKEN` (fine-grained, storefiles repo only),
    `B2_KEY_ID`, `B2_APP_KEY` — Worker secrets (dashboard or `wrangler secret
    put`) or `worker/.dev.vars` locally (git-ignored). Public values live in
    `worker/wrangler.toml` `[vars]` and root `.env.example` (Vite `VITE_*`).
@@ -260,7 +260,7 @@ Base: each production site proxies/serves the same Worker at `/api/*`.
 | `GET /api/download/:releaseId` | ✅ records a `downloads` row, 302-redirects to the stored GitHub/B2 URL |
 | `POST /api/uploads/image` | ✅ proxies to ImgBB with the server-side key, returns `{provider, url, deleteUrl}` |
 | `POST /api/uploads/apk-ticket` | ✅ size rule: ≤25 MB → GitHub worker-upload mode; >25 MB → B2 presigned PUT (SigV4, 1 h) + public URL |
-| `POST /api/uploads/apk` | ✅ uploads ≤25 MB APK to GitHub `store-files` Releases (`package@versionCode` tag), returns CDN URL |
+| `POST /api/uploads/apk` | ✅ uploads ≤25 MB APK to GitHub `storefiles` Releases (`package@versionCode` tag), returns CDN URL |
 | `POST /api/store/apps/:id/reviews|wishlist|report|library`, `GET /api/store/library|wishlist` | ✅ Session 2: login-ke-baad wale user actions (ek user = ek review, rating Worker par recompute) |
 | `/api/dev/*` (register, apps CRUD + listing/screenshots, releases, submit, stats, reviews+reply) | ✅ Session 2: `sql/01` tables par, ownership + package-uniqueness + version-code-monotonic rules ke saath |
 | `/api/admin/*` (queue, approve/reject — note reject par mandatory, suspend/restore, feature, reports resolve) | ✅ Session 2: approve par ek hi live release + app published; purana live version naye review ke dauran chalta rehta hai |
@@ -344,7 +344,7 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
    and run `sql/01_StoreSchema.sql`.
 2. Register the `gothwad-store` client in **Accounts'** `ecosystem_apps`
    (redirect URIs for all four `/auth/callback`s + localhost).
-3. Create keys: ImgBB API key; GitHub fine-grained PAT for `store-files`;
+3. Create keys: ImgBB API key; GitHub fine-grained PAT for `storefiles`;
    Backblaze B2 private bucket + scoped key.
 4. Cloudflare Pages: connect this repo (`npm run build` → `dist`), attach
    all four custom domains.
