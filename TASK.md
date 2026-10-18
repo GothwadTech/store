@@ -1,19 +1,19 @@
-# 📋 TASK.md — Gothwad Store live status
+# 📋 TASK.md — Kiwi Store live status
 
-**Last updated:** 2026-10-16 (console reliability pass: GitHub-only APK uploads, 50 MB cap, guided publishing) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
+**Last updated:** 2026-10-18 (🥝 Kiwi Store rebrand + domains config-driven; dashboard steps `docs/KIWI_MIGRATION.md`) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
 
 ## ✅ Ho gaya (Session 1 — 2026-10-16)
 
 - [x] PLAN.md — poora design (Accounts/Mail pattern par)
 - [x] Repo skeleton — Vite + React 19 + TS + Tailwind 4 (Mail stack)
-- [x] **Store** (`store.*`) — Play-look home, Apps/Games, search, category, charts,
+- [x] **Store** (`kiwistore.*`) — Play-look home, Apps/Games, search, category, charts,
       app detail (screenshots/reviews/wishlist/download), library, developer page
-- [x] **Developer Console** (`console.*`) — onboarding, dashboard, create app
+- [x] **Developer Console** (`kiwiconsole.*`) — onboarding, dashboard, create app
       (package unique check), listing editor (ImgBB images), APK release upload
       (GitHub storefiles, ≤50MB, live byte progress), submit-for-review, stats, review reply
-- [x] **Admin** (`storeadmin.*`) — manual review queue (approve/reject+note),
+- [x] **Admin** (`kiwiadmin.*`) — manual review queue (approve/reject+note),
       all-apps suspend/restore, user reports. Sirf `ADMIN_USERNAMES` wale
-- [x] **StoreApp landing** (`storeapp.*`) — Store Android app download page + QR
+- [x] **StoreApp landing** (`kiwiapp.*`) — Store Android app download page + QR
 - [x] Ek SPA, hostname se shell switch; preview/local me neeche mode-switcher
 - [x] Auth — "Sign in with Gothwad" PKCE flow + Worker `/api/me` (cookie/Bearer);
       optional local/preview demo account is host-gated off all production domains
@@ -30,11 +30,12 @@
       sahit codebase ke saare repo-name references `store-files` →
       `storefiles`. (File paths/technical dashes ko haath nahi lagaya;
       `sql/` me repo naam tha hi nahi — wahan provider value `github` hai.)
-- [x] **Admin domain badla:** purana two-level admin domain →
+- [x] **Admin domain badla:** purana two-level admin domain → one-level
       `storeadmin.gothwadtech.com` har jagah (config.ts hostname detection +
-      SITE_URLS, wrangler.toml ADMIN_URL + routes, saari docs). Chaaro final
+      SITE_URLS, wrangler.toml ADMIN_URL + routes, saari docs). Us waqt ke chaaro
       domains: `store` · `console` · `storeadmin` · `storeapp` (sab one-level,
-      free Universal SSL kaafi — Total TLS nahi chahiye)
+      free Universal SSL kaafi — Total TLS nahi chahiye).
+      ⚠️ Session 3 me naam badal kar `kiwi*` ho gaye — neeche dekho.
 - [x] **Worker CRUD live (code):** `/api/dev/*` (register, apps CRUD + listing
       + screenshots, releases, submit, stats, review reply) aur `/api/admin/*`
       (queue, approve/reject+note, suspend/restore, feature, reports) —
@@ -105,12 +106,46 @@
 - [ ] After owner-only service setup, smoke-test Accounts cookie/OAuth, live
       catalog, ImgBB, and GitHub uploads end-to-end.
 
+## ✅ Session 3 (2026-10-18) — 🥝 Kiwi Store rebrand + config-driven domains
+
+- [x] **Product rename:** `Gothwad Store` → **`Kiwi Store`** (short name `Kiwi`) —
+      UI copy, `index.html` SEO tags, PWA manifest, Worker messages, docs.
+      Gothwad Accounts / Gothwad ecosystem / ecosystem app names **waise hi** hain.
+- [x] **Domains:** `store.` → `kiwistore.` · `console.` → `kiwiconsole.` ·
+      `storeadmin.` → `kiwiadmin.` · `storeapp.` → `kiwiapp.`
+- [x] **Zero hardcoding:** `shared/brand.ts` = naam + domains ka single source of
+      truth. Browser (`src/lib/config.ts`), build (`vite.config.ts` → `index.html`
+      `%TOKEN%` + generated `manifest.json`) aur Worker (`worker/src/index.ts` →
+      CORS + copy) sab wahi se padhte hain. Override: Pages `VITE_*`, Worker `[vars]`.
+- [x] `public/manifest.json` hataya — ab build/dev me brand config se generate hota hai
+- [x] OAuth `client_id`: `gothwad-store` → `kiwi-store`
+- [x] Browser/worker storage keys `gothwad-*` → `kiwi-*` (preview state + tokens)
+- [x] Naya test `tests/brand-config.test.mjs` (brand/domain config + no-hardcode guard);
+      `npm run lint` + `npm run build` + `npm test` (26 tests) saaf
+
+- [x] **Store App host:** `kiwistoreapp.*` → **`kiwiapp.gothwadtech.com`**
+- [x] **UI design-system pass (phone + desktop):** `src/shared/ui.tsx` me shared
+      primitives (Button/Card/PageHeader/StatCard/Tabs/Sheet/EmptyState/Skeleton/
+      Pill/Avatar/AccountMenu/SiteFooter/useToast); Store me desktop nav + mobile
+      bottom bar + account dropdown + sticky install bar + skeletons + footer;
+      Console/Admin me hamburger drawer, tables ka mobile card view, `alert()` → toast;
+      landing par sticky header + mobile download bar
+- [x] `npm run test:ui` — build ke baad jsdom me 8 surfaces render + responsive markers
+
+### 🔜 Is rebrand ke dashboard steps (owner) — `docs/KIWI_MIGRATION.md`
+
+- [ ] Pages: chaaro naye custom domains add karo — `kiwistore` · `kiwiconsole` · `kiwiadmin` · `kiwiapp` (purane abhi rehne do)
+- [ ] Worker `store`: chaaro naye `/api/*` routes + naye vars (`npm run worker:deploy`)
+- [ ] Accounts `ecosystem_apps`: `client_id` → `kiwi-store` + chaaro naye redirect URIs
+- [ ] Verify (health, sign-in, upload→approve→download, PWA naam)
+- [ ] Old → new 301 redirect rules, phir purane domains/routes remove
+
 ## 🔜 Agla (owner ke human steps pehle — docs/SETUP.md)
 
-- [ ] Supabase project `gothwad-store` banao → SQL chalao → keys Worker me
-- [ ] Accounts ke `ecosystem_apps` me `gothwad-store` register karo (SETUP §2;
+- [ ] Supabase project `kiwi-store` banao → SQL chalao → keys Worker me
+- [ ] Accounts ke `ecosystem_apps` me `kiwi-store` register karo (SETUP §2;
       chaaro `/auth/callback` redirect URIs, admin wala
-      `https://storeadmin.gothwadtech.com/auth/callback` sahit)
+      `https://kiwiadmin.gothwadtech.com/auth/callback` sahit)
 - [ ] GitHub repo `GothwadTech/storefiles` (owner bana raha hai) + PAT
 - [ ] ImgBB API key · GitHub storefiles fine-grained token
 - [ ] Cloudflare: Pages project (4 custom domains) + Worker `store` (4 routes)

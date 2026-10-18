@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { stripTypeScriptTypes } from 'node:module';
+import { moduleUrl } from './helpers/ts.mjs';
 
 // Run the real Worker handler with mocked Accounts/Supabase, without a deployment.
-async function moduleUrl(path) {
-  const source = await readFile(new URL(path, import.meta.url), 'utf8');
-  const outputText = stripTypeScriptTypes(source);
-  return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`;
-}
-const apkUrl = await moduleUrl('../worker/src/apk.ts');
-const workerUrl = await moduleUrl('../worker/src/index.ts');
-const workerSource = Buffer.from(workerUrl.split(',')[1], 'base64').toString().replace("'./apk'", JSON.stringify(apkUrl));
+const apkUrl = await moduleUrl('worker/src/apk.ts');
+const brandUrl = await moduleUrl('shared/brand.ts');
+const workerUrl = await moduleUrl('worker/src/index.ts');
+// Worker ke relative imports ko inline karo (apk + shared brand config).
+const workerSource = Buffer.from(workerUrl.split(',')[1], 'base64')
+  .toString()
+  .replace("'./apk'", JSON.stringify(apkUrl))
+  .replace("'../../shared/brand'", JSON.stringify(brandUrl));
 const { default: worker } = await import(`data:text/javascript;base64,${Buffer.from(workerSource).toString('base64')}`);
 
 const env = {

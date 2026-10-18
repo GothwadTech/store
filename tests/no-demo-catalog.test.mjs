@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { stripTypeScriptTypes } from 'node:module';
+import { moduleUrl } from './helpers/ts.mjs';
 
-async function moduleUrl(path) {
-  const source = await readFile(new URL(path, import.meta.url), 'utf8');
-  return `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source)).toString('base64')}`;
-}
-
-const apkUrl = await moduleUrl('../worker/src/apk.ts');
-const workerUrl = await moduleUrl('../worker/src/index.ts');
-const workerSource = Buffer.from(workerUrl.split(',')[1], 'base64').toString().replace("'./apk'", JSON.stringify(apkUrl));
+const apkUrl = await moduleUrl('worker/src/apk.ts');
+const brandUrl = await moduleUrl('shared/brand.ts');
+const workerUrl = await moduleUrl('worker/src/index.ts');
+// Worker ke relative imports ko inline karo (apk + shared brand config).
+const workerSource = Buffer.from(workerUrl.split(',')[1], 'base64')
+  .toString()
+  .replace("'./apk'", JSON.stringify(apkUrl))
+  .replace("'../../shared/brand'", JSON.stringify(brandUrl));
 const { default: worker } = await import(`data:text/javascript;base64,${Buffer.from(workerSource).toString('base64')}`);
 
 test('unconfigured catalog returns empty API data instead of sample listings', async () => {
@@ -71,10 +71,11 @@ test('download endpoint does not expose a live release for an unpublished app', 
   assert.equal((await response.json()).error, 'not_found');
 });
 
-test('demo fixtures and identity are synchronously gated off on Gothwad production hosts', async () => {
+test('demo fixtures and identity are synchronously gated off on production (brand zone) hosts', async () => {
   const seed = await readFile(new URL('../src/data/seed.ts', import.meta.url), 'utf8');
   const context = await readFile(new URL('../src/lib/AppContext.tsx', import.meta.url), 'utf8');
   const config = await readFile(new URL('../src/lib/config.ts', import.meta.url), 'utf8');
+  const brand = await readFile(new URL('../shared/brand.ts', import.meta.url), 'utf8');
   const auth = await readFile(new URL('../src/lib/auth.ts', import.meta.url), 'utf8');
   const ui = await readFile(new URL('../src/shared/ui.tsx', import.meta.url), 'utf8');
   const store = await readFile(new URL('../src/store/StoreApp.tsx', import.meta.url), 'utf8');
@@ -84,8 +85,12 @@ test('demo fixtures and identity are synchronously gated off on Gothwad producti
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
   assert.match(seed, /SEED_APPS/); // Fixtures remain available to local/preview.
-  assert.match(config, /hostname\.toLowerCase\(\)\.replace/); // Trailing-dot DNS names are normalized.
-  assert.match(config, /host === 'gothwadtech\.com' \|\| host\.endsWith\('\.gothwadtech\.com'\)/);
+  // Production zone ka check shared/brand.ts me hai (env se appDomain aata hai).
+  assert.match(brand, /hostname\.toLowerCase\(\)\.replace/); // Trailing-dot DNS names are normalized.
+  assert.match(brand, /return host === domain \|\| host\.endsWith\(`\.\$\{domain\}`\);/);
+  assert.match(brand, /appDomain: 'gothwadtech\.com'/);
+  assert.match(config, /isBrandHost\(window\.location\.hostname, BRAND\.appDomain\)/);
+  assert.match(config, /modeForHost\(host, BRAND\)/);
   assert.match(config, /export function isDemoModeAllowed\(\): boolean\s*\{\s*return !isProductionHostCheck\(\);/);
   assert.match(context, /const demoModeAvailable = isDemoModeAllowed\(\);/);
   assert.match(context, /useState<AppState>\(\(\) => loadState\(demoModeAvailable\)\)/);

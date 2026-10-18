@@ -1,25 +1,43 @@
 # =============================================================================
-# GOTHWAD STORE WORKER - Cloudflare Wrangler Configuration
+# KIWI STORE WORKER - Cloudflare Wrangler Configuration
 # Deploy:  npm run worker:deploy
 # Local:   npm run worker:dev     (http://127.0.0.1:8787)
 # =============================================================================
-# Dashboard ke Worker ka naam isse MATCH hona chahiye: "store" (rename mat karo)
+# Dashboard ke Worker ka naam isse MATCH hona chahiye: "store" (rename mat karo -
+# Worker wahi rahega, sirf custom domains/routes badalte hain)
 name = "store"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 keep_vars = true
 
 # ── PUBLIC VARIABLES (secret nahi) ──────────────────────────────────
+# Domain/name badalna ho to SIRF yeh block badlo (ya dashboard → Worker →
+# Settings → Variables). Code me kahin domain hardcode nahi hai.
 [vars]
+APP_NAME = "Kiwi Store"
+APP_SHORT_NAME = "Kiwi"
+ECOSYSTEM_NAME = "Gothwad"
 APP_DOMAIN = "gothwadtech.com"
-STORE_URL = "https://store.gothwadtech.com"
-CONSOLE_URL = "https://console.gothwadtech.com"
-ADMIN_URL = "https://storeadmin.gothwadtech.com"
-STOREAPP_URL = "https://storeapp.gothwadtech.com"
+# Store ki apni Android app ka package (APK wahi hai jab tak rebuild na ho)
+STOREAPP_PACKAGE = "com.gothwad.store"
+
+# Chaaro sites ke subdomain -> https://<host>.<APP_DOMAIN>
+STORE_HOST = "kiwistore"
+CONSOLE_HOST = "kiwiconsole"
+ADMIN_HOST = "kiwiadmin"
+STOREAPP_HOST = "kiwiapp"
+
+# Koi site dusre zone/custom hostname par ho to poora URL yahan daal do
+# ( warna khaali chhod do - upar wale host + domain se ban jayega)
+STORE_URL = ""
+CONSOLE_URL = ""
+ADMIN_URL = ""
+STOREAPP_URL = ""
+
 # Server-side Accounts calls ka base (Custom Domain host - same-zone rule, Mail wala lesson)
 AUTH_HUB_URL = "https://api.gothwadtech.com"
 AUTH_SIGNIN_URL = "https://accounts.gothwadtech.com"
-OAUTH_CLIENT_ID = "gothwad-store"
+OAUTH_CLIENT_ID = "kiwi-store"
 # Store ke APNE Supabase project ka URL (Accounts/Mail se alag) - yahan asal URL dalo
 SUPABASE_URL = "https://hovlmfkwpdusrvkcdbjl.supabase.co"
 # Admin ke Accounts usernames (comma separated)
@@ -27,6 +45,7 @@ ADMIN_USERNAMES = "pawan"
 # GitHub storefiles repo (all APKs up to 50 MB yahi jayengi)
 GITHUB_FILES_OWNER = "GothwadTech"
 GITHUB_FILES_REPO = "storefiles"
+# CORS: chaaro site URLs apne aap allow hain; extra origin chahiye to comma separated
 ALLOWED_ORIGINS = ""
 
 # ── SECRETS (yahan kabhi mat likho - dashboard/wrangler secret put) ─
@@ -34,8 +53,8 @@ ALLOWED_ORIGINS = ""
 #   IMGBB_API_KEY               saari images ke liye
 #   GITHUB_FILES_TOKEN          sirf storefiles repo ka fine-grained PAT
 
-# ── ROUTES (dashboard me lagana hai - docs/SETUP.md) ────────────────
-#   store.gothwadtech.com/api/*          -> yeh Worker
-#   console.gothwadtech.com/api/*        -> yeh Worker
-#   storeadmin.gothwadtech.com/api/*  -> yeh Worker
-#   storeapp.gothwadtech.com/api/*       -> yeh Worker
+# ── ROUTES (dashboard me lagana hai - docs/SETUP.md + docs/KIWI_MIGRATION.md) ─
+#   kiwistore.gothwadtech.com/api/*      -> yeh Worker
+#   kiwiconsole.gothwadtech.com/api/*    -> yeh Worker
+#   kiwiadmin.gothwadtech.com/api/*      -> yeh Worker
+#   kiwiapp.gothwadtech.com/api/*   -> yeh Worker

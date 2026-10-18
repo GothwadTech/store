@@ -1,7 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════
-// GOTHWAD STORE WORKER - ek hi API chaaro cheezon ke liye:
-//   store.gothwadtech.com · console.gothwadtech.com
-//   storeadmin.gothwadtech.com · storeapp.gothwadtech.com · Android app
+// KIWI STORE WORKER - ek hi API chaaro cheezon ke liye:
+//   store · console · admin · storeapp sites + Android app
+//
+// Naam aur domains YAHAN hardcode nahi hote: shared/brand.ts defaults hain aur
+// Worker variables (APP_NAME, APP_DOMAIN, STORE_HOST/CONSOLE_HOST/ADMIN_HOST/
+// STOREAPP_HOST, ya poore *_URL) se override hote hain. Domain badalna ho to
+// sirf variable badlo - code nahi. (Dashboard → Worker → Settings → Variables)
 //
 // Pakke niyam (PLAN.md):
 //  · Supabase = Store ka APNA project, SIRF database (Storage bilkul nahi)
@@ -14,25 +18,42 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { parseApkManifest, sha256Hex } from './apk';
+import { resolveBrand } from '../../shared/brand';
 
 interface Env {
-  APP_DOMAIN: string;
-  STORE_URL: string;
-  CONSOLE_URL: string;
-  ADMIN_URL: string;
-  STOREAPP_URL: string;
+  /** Brand + domain config (sab optional - defaults shared/brand.ts me). */
+  APP_NAME?: string;
+  APP_SHORT_NAME?: string;
+  ECOSYSTEM_NAME?: string;
+  APP_DOMAIN?: string;
+  STOREAPP_PACKAGE?: string;
+  /** Site hosts (subdomain) - poora URL = https://<host>.<APP_DOMAIN> */
+  STORE_HOST?: string;
+  CONSOLE_HOST?: string;
+  ADMIN_HOST?: string;
+  STOREAPP_HOST?: string;
+  /** Optional full-URL override (dusra zone/custom hostname ho to). */
+  STORE_URL?: string;
+  CONSOLE_URL?: string;
+  ADMIN_URL?: string;
+  STOREAPP_URL?: string;
   AUTH_HUB_URL: string;
-  AUTH_SIGNIN_URL: string;
-  OAUTH_CLIENT_ID: string;
+  AUTH_SIGNIN_URL?: string;
+  OAUTH_CLIENT_ID?: string;
   SUPABASE_URL: string;
   ADMIN_USERNAMES: string;
   GITHUB_FILES_OWNER: string;
   GITHUB_FILES_REPO: string;
-  ALLOWED_ORIGINS: string;
+  ALLOWED_ORIGINS?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   IMGBB_API_KEY?: string;
   GITHUB_FILES_TOKEN?: string;
 }
+
+// ── Brand / site URLs (env driven, shared/brand.ts defaults) ────────
+const brandOf = (env: Env) => resolveBrand(env as unknown as Record<string, unknown>, { prefix: '' });
+const appName = (env: Env) => brandOf(env).appName;
+const siteUrls = (env: Env) => Object.values(brandOf(env).siteUrls);
 
 const MAX_APK_SIZE = 50 * 1024 * 1024; // Keep multipart + Worker memory safely below platform request limits.
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
@@ -49,7 +70,7 @@ const err = (code: string, message: string, status = 400) => json({ error: code,
 function corsHeaders(req: Request, env: Env): Record<string, string> {
   const origin = req.headers.get('Origin') ?? '';
   const allowed = [
-    env.STORE_URL, env.CONSOLE_URL, env.ADMIN_URL, env.STOREAPP_URL,
+    ...siteUrls(env),
     ...(env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   ];
   let hostOk = false;
@@ -102,13 +123,13 @@ async function sbWrite(env: Env, path: string, method: string, body?: unknown, p
 // PostgREST's raw detail can contain an entire row (including a user's support
 // email and unpublished listing data). Keep that useful detail in Worker logs,
 // but never send it to the browser.
-const dbFail = (detail: string) => {
+const dbFail = (env: Env, detail: string) => {
   console.error('Store database request failed:', detail);
   const missingRequiredValue = /"code"\s*:\s*"?23502"?|not-null constraint/i.test(detail);
   return err(
     'database_error',
     missingRequiredValue
-      ? 'The Store database rejected a required listing field. Please retry; if it continues, contact Gothwad Store support.'
+      ? `The Store database rejected a required listing field. Please retry; if it continues, contact ${appName(env)} support.`
       : 'The Store database could not save this change. Please try again in a moment.',
     502,
   );
@@ -305,14 +326,14 @@ async function githubUploadApk(env: Env, packageName: string, versionCode: numbe
     Authorization: `Bearer ${env.GITHUB_FILES_TOKEN}`,
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'gothwad-store-worker',
+    'User-Agent': 'kiwi-store-worker',
   };
   const tag = `${packageName}@${versionCode}`;
   let response = await fetch(`${base}/releases/tags/${encodeURIComponent(tag)}`, { headers });
   if (response.status === 404) {
     response = await fetch(`${base}/releases`, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tag_name: tag, name: `${packageName} v${versionCode}`, body: 'Uploaded by Gothwad Store' }),
+      body: JSON.stringify({ tag_name: tag, name: `${packageName} v${versionCode}`, body: `Uploaded by ${appName(env)}` }),
     });
   }
   if (!response.ok) throw new Error(`GitHub release setup failed (${response.status})`);
@@ -435,11 +456,11 @@ export default {
           let saved: Row | null = null;
           if (existing.length) {
             const w = await sbWrite(env, `reviews?id=eq.${enc(str(existing[0].id))}`, 'PATCH', { rating, body: str(body.body) });
-            if (!w.ok) return out(dbFail(w.detail));
+            if (!w.ok) return out(dbFail(env, w.detail));
             saved = w.rows[0] ?? null;
           } else {
             const w = await sbWrite(env, 'reviews', 'POST', { id: newId('rev'), app_id: appId, user_id: user.id, username: user.username, rating, body: str(body.body) });
-            if (!w.ok) return out(dbFail(w.detail));
+            if (!w.ok) return out(dbFail(env, w.detail));
             saved = w.rows[0] ?? null;
           }
           await recomputeRating(env, appId);
@@ -447,18 +468,18 @@ export default {
         }
         if (action === 'reviews' && req.method === 'DELETE') {
           const w = await sbWrite(env, `reviews?app_id=eq.${enc(appId)}&user_id=eq.${enc(user.id)}`, 'DELETE');
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           await recomputeRating(env, appId);
           return out(json({ ok: true }));
         }
         if (action === 'wishlist' && req.method === 'POST') {
           const w = await sbWrite(env, 'wishlists', 'POST', { user_id: user.id, app_id: appId }, 'resolution=ignore-duplicates,return=minimal');
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           return out(json({ ok: true, wishlisted: true }));
         }
         if (action === 'wishlist' && req.method === 'DELETE') {
           const w = await sbWrite(env, `wishlists?user_id=eq.${enc(user.id)}&app_id=eq.${enc(appId)}`, 'DELETE');
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           return out(json({ ok: true, wishlisted: false }));
         }
         if (action === 'report' && req.method === 'POST') {
@@ -470,7 +491,7 @@ export default {
           if (!w.ok) {
             // reporter_username column agar purani SQL me na ho to uske bina dobara koshish
             const retry = await sbWrite(env, 'reports', 'POST', { id: newId('rep'), app_id: appId, reporter_user_id: user.id, reason: str(body.reason, 'Other'), details: str(body.details) || null, status: 'open' });
-            if (!retry.ok) return out(dbFail(retry.detail));
+            if (!retry.ok) return out(dbFail(env, retry.detail));
             return out(json({ report: retry.rows[0] ? mapReport(retry.rows[0], app) : null }));
           }
           return out(json({ report: w.rows[0] ? mapReport(w.rows[0], app) : null }));
@@ -480,7 +501,7 @@ export default {
           const w = await sbWrite(env, 'library', 'POST',
             { user_id: user.id, app_id: appId, last_version_code: body.versionCode == null ? null : num(body.versionCode) },
             'resolution=merge-duplicates,return=minimal');
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           return out(json({ ok: true }));
         }
         return out(err('method_not_allowed', 'Method not allowed', 405));
@@ -628,12 +649,12 @@ export default {
           };
           if (existing) {
             const w = await sbWrite(env, `developers?id=eq.${enc(str(existing.id))}`, 'PATCH', payload);
-            if (!w.ok) return out(dbFail(w.detail));
+            if (!w.ok) return out(dbFail(env, w.detail));
             return out(json({ developer: mapDeveloper(w.rows[0] ?? { ...existing, ...payload }) }));
           }
           const id = `dev-${user.username.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'developer'}`;
           const w = await sbWrite(env, 'developers', 'POST', { id, user_id: user.id, username: user.username, ...payload });
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           return out(json({ developer: mapDeveloper(w.rows[0]) }));
         }
 
@@ -680,7 +701,7 @@ export default {
             status: 'draft', short_desc: '', full_desc: '', icon_url: '', tags: [],
             support_email: str(developer.support_email),
           });
-          if (!w.ok) return out(w.status === 409 ? err('package_taken', 'This package name is already taken', 409) : dbFail(w.detail));
+          if (!w.ok) return out(w.status === 409 ? err('package_taken', 'This package name is already taken', 409) : dbFail(env, w.detail));
           const bundle = await bundleApps(env, w.rows);
           return out(json({ app: bundle.apps[0] }, 201));
         }
@@ -694,7 +715,7 @@ export default {
           const reviewRows = await sbList<Row>(env, `reviews?id=eq.${enc(devReviewReply[2])}&app_id=eq.${enc(str(owned.app.id))}&select=*`);
           if (!reviewRows.length) return out(err('not_found', 'Review not found', 404));
           const w = await sbWrite(env, `reviews?id=eq.${enc(devReviewReply[2])}`, 'PATCH', { developer_reply: str(body.reply), developer_reply_at: new Date().toISOString() });
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           return out(json({ review: w.rows[0] ? mapReview(w.rows[0]) : null }));
         }
 
@@ -723,7 +744,7 @@ export default {
           if (!submission) {
             if (str(rel.review_status) === 'rejected') await sbWrite(env, `app_releases?id=eq.${enc(str(rel.id))}`, 'PATCH', { review_status: 'pending', review_note: null }, 'return=minimal');
             const w = await sbWrite(env, 'review_submissions', 'POST', { id: newId('sub'), app_id: appId, release_id: str(rel.id), submitted_by: user.username, status: 'pending' });
-            if (!w.ok) return out(dbFail(w.detail));
+            if (!w.ok) return out(dbFail(env, w.detail));
             submission = w.rows[0] ?? null;
           }
           // Published app ka purana live version chalta rahega; sirf unpublished app in_review me jayega.
@@ -776,7 +797,7 @@ export default {
               permissions: Array.isArray(manifest.permissions) ? manifest.permissions.map(String) : strArr(body.permissions),
               changelog: str(body.changelog), review_status: 'pending', is_live: false,
             });
-            if (!w.ok) return out(dbFail(w.detail));
+            if (!w.ok) return out(dbFail(env, w.detail));
             return out(json({ release: mapRelease(w.rows[0]) }, 201));
           }
           if (section === 'reviews' && req.method === 'GET') {
@@ -843,7 +864,7 @@ export default {
               } else return out(err('bad_request', 'Only unlisted or published (with a live release) can be set here', 400));
             }
             const w = await sbWrite(env, `apps?id=eq.${enc(appId)}`, 'PATCH', patchRow);
-            if (!w.ok) return out(dbFail(w.detail));
+            if (!w.ok) return out(dbFail(env, w.detail));
             if (Array.isArray(body.screenshots)) {
               await sbWrite(env, `app_screenshots?app_id=eq.${enc(appId)}`, 'DELETE', undefined, 'return=minimal');
               const shots = body.screenshots.map(String).filter(Boolean).slice(0, 8);
@@ -870,7 +891,7 @@ export default {
             if (!live.length) return out(err('no_live_release', 'An approved release is required before this app can go live', 400));
           }
           const w = await sbWrite(env, `apps?id=eq.${enc(appId)}`, 'PATCH', { status: devStatus[2] === 'delist' ? 'unlisted' : 'published', updated_at: new Date().toISOString() });
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           const bundle = await bundleApps(env, w.rows);
           return out(json({ app: bundle.apps[0] }));
         }
@@ -945,7 +966,7 @@ export default {
           const relWrite = approve
             ? await sbWrite(env, `app_releases?id=eq.${enc(releaseId)}`, 'PATCH', { review_status: 'approved', review_note: note || null, is_live: true })
             : await sbWrite(env, `app_releases?id=eq.${enc(releaseId)}`, 'PATCH', { review_status: 'rejected', review_note: note, is_live: false });
-          if (!relWrite.ok) return out(dbFail(relWrite.detail));
+          if (!relWrite.ok) return out(dbFail(env, relWrite.detail));
           if (approve) {
             // Ek samay par ek hi live release: baaki sab non-live.
             await sbWrite(env, `app_releases?app_id=eq.${enc(appId)}&id=neq.${enc(releaseId)}&is_live=eq.true`, 'PATCH', { is_live: false }, 'return=minimal');
@@ -955,7 +976,7 @@ export default {
             await sbWrite(env, `apps?id=eq.${enc(appId)}`, 'PATCH', { status: live.length ? 'published' : 'draft', updated_at: nowIso }, 'return=minimal');
           }
           const w = await sbWrite(env, `review_submissions?id=eq.${enc(adminDecide[1])}`, 'PATCH', { status: approve ? 'approved' : 'rejected', note: note || null, admin_username: user.username, decided_at: nowIso });
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           const appRows = await sbList<Row>(env, `apps?id=eq.${enc(appId)}&select=*`);
           const relRows = await sbList<Row>(env, `app_releases?id=eq.${enc(releaseId)}&select=*`);
           return out(json({ submission: w.rows[0] ? mapSubmission(w.rows[0], appRows[0], relRows[0]) : null }));
@@ -979,7 +1000,7 @@ export default {
           }
           patchRow.updated_at = new Date().toISOString();
           const w = await sbWrite(env, `apps?id=eq.${enc(appId)}`, 'PATCH', patchRow);
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           const bundle = await bundleApps(env, w.rows.length ? w.rows : [app]);
           return out(json({ app: bundle.apps[0] }));
         }
@@ -990,7 +1011,7 @@ export default {
           const status = str(body.status, 'resolved');
           if (!['resolved', 'dismissed', 'open'].includes(status)) return out(err('bad_request', 'Status must be resolved, dismissed, or open', 400));
           const w = await sbWrite(env, `reports?id=eq.${enc(adminReport[1])}`, 'PATCH', { status });
-          if (!w.ok) return out(dbFail(w.detail));
+          if (!w.ok) return out(dbFail(env, w.detail));
           if (!w.rows.length) return out(err('not_found', 'Report not found', 404));
           const appRows = await sbList<Row>(env, `apps?id=eq.${enc(str(w.rows[0].app_id))}&select=*`);
           return out(json({ report: mapReport(w.rows[0], appRows[0]) }));

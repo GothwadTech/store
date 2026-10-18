@@ -4,9 +4,14 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import test from 'node:test';
+import { moduleUrl } from './helpers/ts.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (path) => readFileSync(join(root, path), 'utf8');
+
+// manifest.json build me generate hota hai (shared/brand.ts + env) - static file nahi.
+const { manifestFor, resolveBrand } = await import(await moduleUrl('shared/brand.ts'));
+const defaultManifest = manifestFor(resolveBrand({}));
 
 function hasVisibleRgbaPixel(data) {
   assert.deepEqual(data.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
@@ -75,8 +80,9 @@ function hasVisibleRgbaPixel(data) {
 }
 
 test('PWA manifest references present, correctly sized, visible web icons', () => {
-  const manifest = JSON.parse(read('public/manifest.json'));
-  assert.equal(manifest.name, 'Gothwad Store');
+  const manifest = defaultManifest;
+  assert.equal(manifest.name, 'Kiwi Store');
+  assert.equal(manifest.short_name, 'Kiwi');
   assert.ok(manifest.icons.length >= 5);
 
   for (const icon of manifest.icons) {
@@ -99,7 +105,7 @@ test('PWA manifest references present, correctly sized, visible web icons', () =
 
 test('all app surfaces and SEO metadata use the shared brand icons', () => {
   const html = read('index.html');
-  const manifest = read('public/manifest.json');
+  const manifest = JSON.stringify(defaultManifest);
   const app = read('src/App.tsx');
   const sharedUi = read('src/shared/ui.tsx');
   const seed = read('src/data/seed.ts');
@@ -118,8 +124,9 @@ test('all app surfaces and SEO metadata use the shared brand icons', () => {
   assert.ok(!manifest.includes('/icon.svg'));
   assert.ok(sharedUi.includes('src="/assets/icon-192.png"'), 'shared Logo should use the new brand icon');
   assert.ok(seed.includes("iconUrl: '/assets/icon-512.png'"), 'demo Store listing should use the new brand icon');
-  for (const mode of ['store', 'console', 'admin', 'storeapp']) {
-    assert.ok(app.includes(`  ${mode}: {`), `SEO metadata is missing for ${mode}`);
-  }
+  assert.ok(app.includes('seoFor(mode, BRAND)'), 'App.tsx should take SEO copy from the brand config');
+  const viteConfig = read('vite.config.ts');
+  assert.ok(viteConfig.includes("fileName: 'manifest.json'"), 'manifest.json should be generated at build time');
+  assert.ok(viteConfig.includes('renderIndexHtml(html, brand)'), 'index.html tokens should be filled from the brand config');
   assert.ok(app.includes("'noindex,nofollow'"), 'Console/Admin and preview metadata should not be indexed');
 });

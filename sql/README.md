@@ -1,13 +1,13 @@
 # 🗄️ sql/ — Supabase SQL files (pehle YEH padho)
 
-Is folder ki files **Gothwad Store ke apne Supabase project** me chalti hain.
+Is folder ki files **Kiwi Store ke apne Supabase project** me chalti hain.
 Accounts ya Mail ke Supabase me **kabhi mat chalana** — har app ka apna project hai.
 
 ---
 
 ## ▶️ Chalane ka tareeka (order fix hai)
 
-1. Supabase Dashboard → apna `gothwad-store` project → **SQL Editor**
+1. Supabase Dashboard → apna `kiwi-store` project → **SQL Editor**
 2. Files **number order** me ek-ek karke chalao: `01_...` → `02_...` → `03_...`
 3. Jo file pehle chala chuke ho, use **dobara chalana safe hai** (neeche dekho)
 

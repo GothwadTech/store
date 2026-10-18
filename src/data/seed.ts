@@ -2,6 +2,7 @@
 // when the synchronous hostname gate allows demo mode; production uses API data.
 import type { Category, ReportItem, Review, StoreApp, Submission } from '../types';
 import { iconPlaceholder } from '../lib/storage';
+import { APP_NAME, ECOSYSTEM_NAME, STOREAPP_PACKAGE } from '../lib/config';
 
 export const CATEGORIES: Category[] = [
   { slug: 'communication', name: 'Communication', kind: 'both', icon: 'MessageCircle' },
@@ -78,11 +79,11 @@ export const SEED_APPS: StoreApp[] = [
     tags: ['browser', 'lite'], ratingAvg: 4.1, ratingCount: 4_300, downloadsCount: 100_000,
   }),
   app({
-    id: 'app-store', packageName: 'com.gothwad.store', name: 'Gothwad Store',
+    id: 'app-store', packageName: STOREAPP_PACKAGE, name: APP_NAME,
     category: 'tools', iconUrl: '/assets/icon-512.png', iconColor: '#0284c7', featured: 'top_new',
-    shortDesc: 'Discover and download Gothwad ecosystem apps',
+    shortDesc: `Discover and download ${ECOSYSTEM_NAME} ecosystem apps`,
     fullDesc:
-      'Gothwad Store is the official app store of the Gothwad ecosystem. Browse apps and games, read reviews, and download APKs directly - linked with your Gothwad Account.',
+      `${APP_NAME} is the official app store of the ${ECOSYSTEM_NAME} ecosystem. Browse apps and games, read reviews, and download APKs directly - linked with your ${ECOSYSTEM_NAME} Account.`,
     tags: ['store', 'apps'], ratingAvg: 4.6, ratingCount: 2_100, downloadsCount: 25_000,
   }),
   app({

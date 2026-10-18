@@ -1,4 +1,4 @@
-# 🛍️ PLAN.md — Gothwad Store (Web App Store + Developer Console)
+# 🛍️ PLAN.md — Kiwi Store (Web App Store + Developer Console)
 
 > **Status: BUILDING 🚧** — 2026-10-16 se code shuru. Chaaro shells (Store /
 > Console / Admin / StoreApp landing) + Worker + SQL is repo me ban gaye hain,
@@ -21,8 +21,8 @@
 
 | # | Product | Domain | Kiske liye | Kis jaisa |
 |---|---------|--------|-----------|-----------|
-| 1 | **Gothwad Store (Web)** | `store.gothwadtech.com` | Public users — apps browse/search/download | Google Play Store (web look) |
-| 2 | **Gothwad Developer Console (Web)** | `console.gothwadtech.com` | Developers — app publish/manage | Play Console / Indus Appstore Developer Console |
+| 1 | **Kiwi Store (Web)** | `kiwistore.gothwadtech.com` | Public users — apps browse/search/download | Google Play Store (web look) |
+| 2 | **Gothwad Developer Console (Web)** | `kiwiconsole.gothwadtech.com` | Developers — app publish/manage | Play Console / Indus Appstore Developer Console |
 
 **Dono ek hi deployment hai** (owner ka decision ✅):
 
@@ -34,17 +34,17 @@
         │  EK alag Supabase project (Store ka apna, SIRF DB)│
         └─────────────────────────────────────────────────┘
               ▲                              ▲
-   store · console · storeadmin · storeapp (Pages custom domains)
-   storeapp.* = Store Android app ka download page
+   kiwistore · kiwiconsole · kiwiadmin · kiwiapp (Pages custom domains)
+   kiwiapp.* = Store Android app ka download page
               │                              │
               └──── Frontend hostname dekh kar shell switch karega ────┘
-                    store.*  → Store UI (Play Store look)
-                    console.* → Console UI (Play Console look)
+                    kiwistore.*  → Store UI (Play Store look)
+                    kiwiconsole.* → Console UI (Play Console look)
 ```
 
 - Cloudflare Pages ek project par **kitne bhi custom domains** lag sakte hain — dono subdomain same build serve karenge.
-- React app boot par `location.hostname` check karega: `console.*` hai to Console mode, warna Store mode. Routes bhi alag (`/` store home, console par `/` = dashboard).
-- API bhi ek: Worker `store` dono par route hoga — `store.gothwadtech.com/api/*` **aur** `console.gothwadtech.com/api/*`. (Same-zone Worker-to-Worker wala issue yahan nahi hai — browser/API same origin rahenge, bilkul Accounts pattern par: frontend + `/api/*` ek origin.)
+- React app boot par `location.hostname` check karega: `kiwiconsole.*` hai to Console mode, warna Store mode. Routes bhi alag (`/` store home, console par `/` = dashboard).
+- API bhi ek: Worker `store` dono par route hoga — `kiwistore.gothwadtech.com/api/*` **aur** `kiwiconsole.gothwadtech.com/api/*`. (Same-zone Worker-to-Worker wala issue yahan nahi hai — browser/API same origin rahenge, bilkul Accounts pattern par: frontend + `/api/*` ek origin.)
 - **Android app (`storeapp` repo)** teesra client hai — wo bhi isi Worker API ko khayega (§10). Yani backend ek, clients teen (Web Store, Web Console, Android App).
 
 ---
@@ -53,7 +53,7 @@
 
 ```
 ┌─ BROWSER ──────────────────────────────────────────────┐
-│  store.gothwadtech.com  /  console.gothwadtech.com     │
+│  kiwistore.gothwadtech.com  /  kiwiconsole.gothwadtech.com     │
 │  Vite + React + TS + Tailwind (Mail repo jaisi stack)  │  Cloudflare Pages (free)
 │  kabhi Supabase se direct baat NAHI karega             │
 └──────────────────┬─────────────────────────────────────┘
@@ -73,7 +73,7 @@
 │ (STORE ka APNA   │   │ accounts.gothwadtech.com        │
 │  project — Mail/ │   │ api.gothwadtech.com             │
 │  Accounts se     │   │ "Sign in with Gothwad" OAuth    │
-│  ALAG)           │   │ client_id = gothwad-store       │
+│  ALAG)           │   │ client_id = kiwi-store       │
 │ • Postgres + RLS │   └─────────────────────────────────┘
 │ • Storage bucket │
 │   (fallback)     │
@@ -87,8 +87,8 @@
 
 1. **Har app ka apna Supabase project.** Store ke liye NEW Supabase project banega. Accounts ka DB sirf identity ke liye hai — Store usko kabhi direct nahi padhega, Mail ke DB ko to bilkul nahi.
 2. **`SUPABASE_SERVICE_ROLE_KEY` sirf Worker me** (secret). Frontend me kabhi nahi. Frontend sirf Worker se baat karega.
-3. **Domain hardcode nahi** — `wrangler.toml` ke `[vars]` me (`APP_DOMAIN`, `STORE_URL`, `CONSOLE_URL`, `AUTH_HUB_URL`...).
-4. **Worker ka naam = `store`** (dashboard ke Worker naam se exact match; rename mat karna — Mail wala `mail` lesson). OAuth `client_id` usse alag cheez hai: **`gothwad-store`** (naming confusion wali galti dobara nahi).
+3. **Domain/name hardcode nahi** — defaults sirf `shared/brand.ts` me; override Worker `[vars]` (`APP_DOMAIN`, `STORE_HOST`/`CONSOLE_HOST`/`ADMIN_HOST`/`STOREAPP_HOST`, `AUTH_HUB_URL`...) aur Pages env (`VITE_APP_DOMAIN`, `VITE_APP_NAME`, `VITE_STORE_URL`...) se.
+4. **Worker ka naam = `store`** (dashboard ke Worker naam se exact match; rename mat karna — Mail wala `mail` lesson). OAuth `client_id` usse alag cheez hai: **`kiwi-store`** (naming confusion wali galti dobara nahi).
 5. Server-to-server Accounts calls ke liye base = **`https://api.gothwadtech.com`** (Accounts ka Custom Domain); browser links ke liye `AUTH_SIGNIN_URL = https://accounts.gothwadtech.com`. (Same-zone rule — Mail PLAN se liya gaya hai.)
 
 ---
@@ -101,24 +101,24 @@ Dono sites (Store + Console) ka login **sirf Gothwad Accounts** se hoga. Koi ala
 
 ```sql
 -- Gothwad ACCOUNTS ke Supabase me chalaana hai (Store ke me NAHI)
--- ecosystem_apps me nayi row: id/client_id = 'gothwad-store'
+-- ecosystem_apps me nayi row: id/client_id = 'kiwi-store'
 -- redirect_uris = ARRAY[
---   'https://store.gothwadtech.com/auth/callback',
---   'https://console.gothwadtech.com/auth/callback',
---   'https://storeadmin.gothwadtech.com/auth/callback',
+--   'https://kiwistore.gothwadtech.com/auth/callback',
+--   'https://kiwiconsole.gothwadtech.com/auth/callback',
+--   'https://kiwiadmin.gothwadtech.com/auth/callback',
 --   'http://localhost:3000/auth/callback'        -- dev
 -- ]
 -- scopes: profile email offline_access
 ```
 
-Ek hi `client_id` (`gothwad-store`) Phase 1 ke liye kaafi hai — chaaro subdomain usi ke redirect URIs hain. Baad me chaahe to `gothwad-store-console` alag kar sakte hain (review/analytics alag karne ke liye), abhi complexity nahi badhaani.
+Ek hi `client_id` (`kiwi-store`) Phase 1 ke liye kaafi hai — chaaro subdomain usi ke redirect URIs hain. Baad me chaahe to `kiwi-store-console` alag kar sakte hain (review/analytics alag karne ke liye), abhi complexity nahi badhaani.
 
 ### 3.2 Login do raaste se chalega (Mail jaisa hybrid)
 
 | Raasta | Kaise | Kab |
 |--------|-------|-----|
-| **Cookie SSO (primary)** | Accounts `.gothwadtech.com` par cookie set karta hai (`Domain=.gothwadtech.com`) → `store.*`/`console.*` par user pehle se logged-in milega. Worker `/api/me` par Accounts ke `/api/auth/me` ko proxy/verify karega | User pehle se kisi Gothwad app me logged in hai |
-| **OAuth 2.0 Code + PKCE (fallback)** | "Sign in with Gothwad" button → `https://accounts.gothwadtech.com/api/oauth/authorize?client_id=gothwad-store&...` → consent → `/auth/callback` par code → Worker `/oauth/token` se exchange → `/oauth/userinfo` se profile | Cookie nahi hai / third-party browser |
+| **Cookie SSO (primary)** | Accounts `.gothwadtech.com` par cookie set karta hai (`Domain=.gothwadtech.com`) → `kiwistore.*`/`kiwiconsole.*` par user pehle se logged-in milega. Worker `/api/me` par Accounts ke `/api/auth/me` ko proxy/verify karega | User pehle se kisi Gothwad app me logged in hai |
+| **OAuth 2.0 Code + PKCE (fallback)** | "Sign in with Gothwad" button → `https://accounts.gothwadtech.com/api/oauth/authorize?client_id=kiwi-store&...` → consent → `/auth/callback` par code → Worker `/oauth/token` se exchange → `/oauth/userinfo` se profile | Cookie nahi hai / third-party browser |
 | **Bearer token** | `Authorization: Bearer <accounts access_token>` — Worker `/oauth/userinfo` se verify | Android `storeapp` (uske paas cookie nahi hogi) |
 
 PKCE code OAuth doc (`GothwadTech/accounts` → `docs/OAUTH.md`) se copy-paste hoga — wahi is integration ka source of truth hai. **Khud se auth invent mat karna.**
@@ -136,7 +136,7 @@ Developer ban-na **ek-baar ka onboarding** hai (Play Console jaisa — identity 
 
 ---
 
-## 4. 🛒 PRODUCT 1 — WEB STORE (`store.gothwadtech.com`)
+## 4. 🛒 PRODUCT 1 — WEB STORE (`kiwistore.gothwadtech.com`)
 
 Google Play Store ke web version jaisa look & feel: safed/hara... nahi — **Gothwad brand** (Accounts/Mail wali dark theme + brand blue design system reuse hogi; Play jaisa *layout*, rang apna).
 
@@ -182,7 +182,7 @@ Google Play Store ke web version jaisa look & feel: safed/hara... nahi — **Got
 
 ---
 
-## 5. 🧑‍💻 PRODUCT 2 — DEVELOPER CONSOLE (`console.gothwadtech.com`)
+## 5. 🧑‍💻 PRODUCT 2 — DEVELOPER CONSOLE (`kiwiconsole.gothwadtech.com`)
 
 Play Console / Indus Developer Console jaisa: left sidebar + dashboard. **Har developer sirf apni apps dekhega** (Worker har request par ownership check karega — DB RLS + Worker dono par).
 
@@ -219,7 +219,7 @@ Play Console / Indus Developer Console jaisa: left sidebar + dashboard. **Har de
 **Review rules (Phase 1):**
 - Har **naya APK version** review se jayega. Jab tak approve nahi, purana published version hi live rahega.
 - Listing (text/images) edits bina review live — lekin admin kabhi bhi action le sakta hai. (Phase 2 me inhe bhi review me la sakte hain.)
-- Admin panel: `/api/admin/*` + alag site **`storeadmin.gothwadtech.com`** (usi Pages project ka chautha domain, sirf `ADMIN_USERNAMES` wale ghus sakte hain).
+- Admin panel: `/api/admin/*` + alag site **`kiwiadmin.gothwadtech.com`** (usi Pages project ka chautha domain, sirf `ADMIN_USERNAMES` wale ghus sakte hain).
 - Review checklist (admin manually check karega): app khulti hai? naam/icon kisi doosri app ki chori to nahi? description sahi hai? khatarnak permissions (SMS, accessibility...) ka reason hai? malware shak → reject/suspend.
 - Reject par **reason mandatory** — developer ko Console me dikhega, phir se submit kar sakta hai.
 
@@ -292,7 +292,7 @@ Cloudinary ek hi kaam me mahir hai jo ImgBB nahi karta: **URL badal-badal kar on
 
 ### 7.1 Setup (Phase 0 me human karega)
 
-1. supabase.com → **New project** (naam: `gothwad-store`) — Accounts/Mail walo se **alag**.
+1. supabase.com → **New project** (naam: `kiwi-store`) — Accounts/Mail walo se **alag**.
 2. Is repo ke `sql/` folder ki SQL files **number order** me chalegi (Accounts pattern: `01_...sql`, `02_...sql` — idempotent, dobara chalane par error nahi).
 3. Keys: `SUPABASE_URL` (public, `wrangler.toml` me) + `SUPABASE_SERVICE_ROLE_KEY` (sirf Worker secret).
 4. **Har table par RLS ON.** Public read sirf published apps ke liye; likhna zyadaatar Worker (service_role) karega.
@@ -337,7 +337,7 @@ Seedha hisaab: **DB = godown ka register (kaunsi file kahan hai), Storage/provid
 
 ## 8. ⚡ WORKER API (`store` — `worker/src/index.ts`)
 
-Route: `store.gothwadtech.com/api/*` + `console.gothwadtech.com/api/*` (ek hi Worker, do routes).
+Route: `kiwistore.gothwadtech.com/api/*` + `kiwiconsole.gothwadtech.com/api/*` (ek hi Worker, do routes).
 
 ### 8.1 Public Store API (login bina bhi)
 
@@ -444,7 +444,7 @@ store/
 Android app alag repo me ban raha hai — wo is plan ka **teesra client** hai, alag backend NAHI.
 
 - `storeapp` ke `AppItem` model ke fields (`packageName, name, developerName, category, rating, ratingCount, downloadCount, fileSizeMb, description, iconUrl`) bilkul `/api/store/apps` ke response se map honge — API response jaanboojh kar inhi naamo ke aas-paas rakha jayega taaki Android side `DummyStoreData` hata kar seedha API lage.
-- Android ka base URL: `https://store.gothwadtech.com/api` (wahi Worker). Login wahan bhi Gothwad Accounts OAuth (PKCE, public client) — web wala hi flow, `client_id = gothwad-store` + Android ke redirect URI ko Accounts me add karna padega.
+- Android ka base URL: `https://kiwistore.gothwadtech.com/api` (wahi Worker). Login wahan bhi Gothwad Accounts OAuth (PKCE, public client) — web wala hi flow, `client_id = kiwi-store` + Android ke redirect URI ko Accounts me add karna padega.
 - **Is repo (store) me Android ka koi code nahi aayega.** Backend ready hote hi storeapp me sirf API integration ka kaam rahega (us repo ka apna plan wahan bane to bane).
 
 ---
@@ -453,16 +453,16 @@ Android app alag repo me ban raha hai — wo is plan ka **teesra client** hai, a
 
 | Cheez | Kahan | Naam/Note |
 |-------|-------|-----------|
-| Frontend | Cloudflare **Pages** (Git auto-deploy, is repo se) | ek project, **4 custom domains**: `store.gothwadtech.com` · `console.gothwadtech.com` · `storeadmin.gothwadtech.com` · `storeapp.gothwadtech.com` |
+| Frontend | Cloudflare **Pages** (Git auto-deploy, is repo se) | ek project, **4 custom domains**: `kiwistore.gothwadtech.com` · `kiwiconsole.gothwadtech.com` · `kiwiadmin.gothwadtech.com` · `kiwiapp.gothwadtech.com` |
 | API | Cloudflare **Worker** | name = **`store`**, routes: chaaro subdomains ke `/api/*` |
-| Database | **Supabase** (naya project `gothwad-store`) | SQL is repo ke `sql/` folder se (sql/README.md dekho) |
+| Database | **Supabase** (naya project `kiwi-store`) | SQL is repo ke `sql/` folder se (sql/README.md dekho) |
 | APK/images | GitHub Releases + Backblaze B2 + ImgBB (§6) | sab free, bina card |
-| Auth | Gothwad Accounts (pehle se live pattern) | `gothwad-store` client register karna hai |
+| Auth | Gothwad Accounts (pehle se live pattern) | `kiwi-store` client register karna hai |
 | DNS | Cloudflare (zone `gothwadtech.com` pehle se hai) | chaaro subdomain Pages/Worker par — dashboard steps `docs/SETUP.md` me likhe jayenge |
 
 **Worker secrets (dashboard/`wrangler secret put`, kabhi git me nahi):**
 `SUPABASE_SERVICE_ROLE_KEY` · `GITHUB_FILES_TOKEN` · `B2_KEY_ID` · `B2_APP_KEY` · `IMGBB_API_KEY` (+ baad me `R2_*`)
-**Public vars (`wrangler.toml`):** `APP_DOMAIN=gothwadtech.com` · `STORE_URL` · `CONSOLE_URL` · `AUTH_HUB_URL=https://api.gothwadtech.com` · `AUTH_SIGNIN_URL=https://accounts.gothwadtech.com` · `SUPABASE_URL=<store project>` · `ADMIN_USERNAMES` · `ALLOWED_ORIGINS`
+**Public vars (`wrangler.toml`):** `APP_NAME=Kiwi Store` · `APP_DOMAIN=gothwadtech.com` · `STORE_HOST=kiwistore` · `CONSOLE_HOST=kiwiconsole` · `ADMIN_HOST=kiwiadmin` · `STOREAPP_HOST=kiwiapp` (ya poore `*_URL` override) · `AUTH_HUB_URL=https://api.gothwadtech.com` · `AUTH_SIGNIN_URL=https://accounts.gothwadtech.com` · `OAUTH_CLIENT_ID=kiwi-store` · `SUPABASE_URL=<store project>` · `ADMIN_USERNAMES` · `ALLOWED_ORIGINS`
 
 **Free-tier ki seemayein (pehle se jaan lo):** Supabase free 500 MB DB + 1 GB storage (isiliye APK wahan primary NAHI) · B2 10 GB ke baad download/storage ke paise (bohot chhote) · GitHub Releases ka fair-use dhyaan · ImgBB down ho to image upload rukega (doosra image provider janboojh kar nahi rakha) · Supabase 7 din inactive = pause (Store par traffic rahega to masla nahi; `docs/SETUP.md` me keep-alive tip).
 
@@ -471,8 +471,8 @@ Android app alag repo me ban raha hai — wo is plan ka **teesra client** hai, a
 ## 12. 🗺️ PHASES / ROADMAP (execution order)
 
 ### Phase 0 — Setup (aadha din)
-- [ ] Supabase project `gothwad-store` banao, URL + keys lo
-- [ ] Accounts ke `ecosystem_apps` me `gothwad-store` register (SQL §3.1) — **human step**
+- [ ] Supabase project `kiwi-store` banao, URL + keys lo
+- [ ] Accounts ke `ecosystem_apps` me `kiwi-store` register (SQL §3.1) — **human step**
 - [ ] GitHub repo `GothwadTech/storefiles` (public) + fine-grained PAT
 - [ ] Backblaze B2 account + private bucket + app key · ImgBB API key
 - [ ] Cloudflare: Worker `store` + Pages project khali khada karo, chaaro subdomain jodo
@@ -502,7 +502,7 @@ Paid apps + payouts · web se phone par install push (Accounts session ke zariye
 
 ## 13. ⚠️ KHULE FAISLE / RISKS (yaad rakhne ke liye)
 
-1. **Ek `client_id` vs do** — abhi ek (`gothwad-store`) rakha hai; console alag karna ho to Phase 2 me sochenge. Final faisla Phase 0 me confirm karna.
+1. **Ek `client_id` vs do** — abhi ek (`kiwi-store`) rakha hai; console alag karna ho to Phase 2 me sochenge. Final faisla Phase 0 me confirm karna.
 2. **Admin kaun hai** — `ADMIN_USERNAMES` env me pehla naam owner ka Accounts username. Baad me DB role table la sakte hain.
 3. **Listing edits bina review live honge** (Phase 1) — galat istemal hua to Phase 2 me inhe bhi review me daal denge. APK hamesha reviewed hi rahega — ye line nahi tootegi.
 4. **GitHub Releases ka bharosa** — wo distribution mirror hai, ekmatra copy NAHI. Har APK ka hash DB me + ek backup provider par (B2) rakhna policy rahegi.
@@ -513,8 +513,8 @@ Paid apps + payouts · web se phone par install push (Accounts session ke zariye
 
 ## 14. ✅ DEFINITION OF DONE (Phase 1 kab "ho gaya" khelege)
 
-- [ ] Koi naya banda Gothwad account se `console.gothwadtech.com` par developer ban kar app + APK upload karke submit kar de
-- [ ] Admin approve kare → app `store.gothwadtech.com` par dikhe, search me mile
+- [ ] Koi naya banda Gothwad account se `kiwiconsole.gothwadtech.com` par developer ban kar app + APK upload karke submit kar de
+- [ ] Admin approve kare → app `kiwistore.gothwadtech.com` par dikhe, search me mile
 - [ ] Visitor bina login ke app download karke Android par install kar le; logged-in user review + wishlist kar le
 - [ ] Reject karne par developer ko reason dikhe aur wo sudhaar kar phir submit kar le
 - [ ] Android `storeapp` wahi API se asli data dikhaane lage (DummyStoreData retire)

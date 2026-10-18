@@ -55,8 +55,8 @@ export async function handleOAuthCallback(): Promise<{ user: GothwadUser } | { e
     });
     if (!res.ok) return { error: 'exchange_failed' };
     const data = await res.json();
-    if (data.accessToken) sessionStorage.setItem('gothwad_access_token', data.accessToken);
-    if (data.refreshToken) sessionStorage.setItem('gothwad_refresh_token', data.refreshToken);
+    if (data.accessToken) sessionStorage.setItem('kiwi_access_token', data.accessToken);
+    if (data.refreshToken) sessionStorage.setItem('kiwi_refresh_token', data.refreshToken);
     return { user: data.user };
   } catch {
     return { error: 'network' };
@@ -64,7 +64,7 @@ export async function handleOAuthCallback(): Promise<{ user: GothwadUser } | { e
 }
 
 export function authHeaders(): Record<string, string> {
-  const t = sessionStorage.getItem('gothwad_access_token');
+  const t = sessionStorage.getItem('kiwi_access_token');
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
@@ -88,8 +88,8 @@ export async function signOut() {
       headers: authHeaders(),
     });
   } catch { /* ignore */ }
-  sessionStorage.removeItem('gothwad_access_token');
-  sessionStorage.removeItem('gothwad_refresh_token');
+  sessionStorage.removeItem('kiwi_access_token');
+  sessionStorage.removeItem('kiwi_refresh_token');
 }
 
 // Local preview identity; AppContext exposes it only after isDemoModeAllowed()

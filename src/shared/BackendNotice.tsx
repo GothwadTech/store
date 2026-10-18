@@ -1,5 +1,6 @@
 import { AlertCircle, LoaderCircle, RefreshCw } from 'lucide-react';
 import { useApp } from '../lib/AppContext';
+import { APP_NAME } from '../lib/config';
 
 export function BackendNotice() {
   const { catalogStatus, isPreviewMode, isDemoUser, backendLive } = useApp();
@@ -30,7 +31,7 @@ export function BackendNotice() {
   const loading = catalogStatus === 'loading';
   const unconfigured = catalogStatus === 'unconfigured';
   const message = loading
-    ? 'Connecting to the Gothwad Store…'
+    ? `Connecting to the ${APP_NAME}…`
     : unconfigured
       ? 'The Store catalog is not available yet. Please try again later.'
       : 'We could not connect to the Store. Check your connection and try again.';
