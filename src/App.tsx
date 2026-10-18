@@ -1,5 +1,14 @@
 import { lazy, Suspense, useLayoutEffect } from 'react';
-import { detectMode, isProductionHostCheck, SITE_MODES, SITE_URLS } from './lib/config';
+import {
+  APP_NAME,
+  BRAND,
+  SITE_MODES,
+  SITE_MODE_STORAGE_KEY,
+  SITE_URLS,
+  detectMode,
+  isProductionHostCheck,
+  seoFor,
+} from './lib/config';
 import type { SiteMode } from './lib/config';
 import StoreApp from './store/StoreApp';
 
@@ -15,7 +24,7 @@ function DevModeSwitcher({ mode }: { mode: SiteMode }) {
       {SITE_MODES.map((m) => (
         <button
           key={m.id}
-          onClick={() => { localStorage.setItem('gothwad-site-mode', m.id); window.location.href = '/?mode=' + m.id; }}
+          onClick={() => { localStorage.setItem(SITE_MODE_STORAGE_KEY, m.id); window.location.href = '/?mode=' + m.id; }}
           className={`rounded-full px-3 py-1.5 text-[11px] font-bold whitespace-nowrap ${mode === m.id ? 'bg-emerald-500 text-white' : 'text-slate-300 hover:bg-white/10'}`}
         >
           {m.label}
@@ -24,25 +33,6 @@ function DevModeSwitcher({ mode }: { mode: SiteMode }) {
     </div>
   );
 }
-
-const SEO_CONTENT: Record<SiteMode, { title: string; description: string }> = {
-  store: {
-    title: 'Gothwad Store | Android Apps & Games',
-    description: 'Discover and download Android apps and games on Gothwad Store. Browse trusted listings and reviews from the Gothwad ecosystem.',
-  },
-  console: {
-    title: 'Gothwad Developer Console',
-    description: 'Publish Android apps to Gothwad Store. Manage app listings, APK releases, reviews, and developer account settings.',
-  },
-  admin: {
-    title: 'Gothwad Store Admin',
-    description: 'Administrative tools for reviewing and managing apps published on Gothwad Store.',
-  },
-  storeapp: {
-    title: 'Gothwad Store App for Android',
-    description: 'Download the official Gothwad Store app for Android and discover apps, games, and updates from the Gothwad ecosystem.',
-  },
-};
 
 function setMeta(attribute: 'name' | 'property', key: string, content: string) {
   let tag = document.head.querySelector<HTMLMetaElement>(`meta[${attribute}="${key}"]`);
@@ -55,7 +45,8 @@ function setMeta(attribute: 'name' | 'property', key: string, content: string) {
 }
 
 function applySeoMetadata(mode: SiteMode) {
-  const { title, description } = SEO_CONTENT[mode];
+  // Title/description app name se derive hote hain (shared/brand.ts) - hardcode nahi.
+  const { title, description } = seoFor(mode, BRAND);
   const canonicalUrl = new URL(window.location.pathname || '/', `${SITE_URLS[mode]}/`).toString();
   const imageUrl = `${SITE_URLS.store}/assets/icon-512.png`;
   const robots = mode === 'console' || mode === 'admin' || !isProductionHostCheck()
@@ -66,7 +57,7 @@ function applySeoMetadata(mode: SiteMode) {
   setMeta('name', 'description', description);
   setMeta('name', 'robots', robots);
   setMeta('property', 'og:type', 'website');
-  setMeta('property', 'og:site_name', 'Gothwad Store');
+  setMeta('property', 'og:site_name', APP_NAME);
   setMeta('property', 'og:title', title);
   setMeta('property', 'og:description', description);
   setMeta('property', 'og:url', canonicalUrl);
@@ -75,12 +66,12 @@ function applySeoMetadata(mode: SiteMode) {
   setMeta('property', 'og:image:type', 'image/png');
   setMeta('property', 'og:image:width', '512');
   setMeta('property', 'og:image:height', '512');
-  setMeta('property', 'og:image:alt', 'Gothwad Store app icon');
+  setMeta('property', 'og:image:alt', `${APP_NAME} app icon`);
   setMeta('name', 'twitter:card', 'summary');
   setMeta('name', 'twitter:title', title);
   setMeta('name', 'twitter:description', description);
   setMeta('name', 'twitter:image', imageUrl);
-  setMeta('name', 'twitter:image:alt', 'Gothwad Store app icon');
+  setMeta('name', 'twitter:image:alt', `${APP_NAME} app icon`);
 
   let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
   if (!canonical) {
@@ -101,7 +92,7 @@ export default function App() {
     <StoreApp />;
   return (
     <>
-      <Suspense fallback={<div className="grid min-h-dvh place-items-center bg-[#212121] text-neutral-400">Loading Gothwad Store…</div>}>
+      <Suspense fallback={<div className="grid min-h-dvh place-items-center bg-[#212121] text-neutral-400">Loading {APP_NAME}…</div>}>
         {shell}
       </Suspense>
       <DevModeSwitcher mode={mode} />

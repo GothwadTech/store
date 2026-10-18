@@ -1,4 +1,4 @@
-// Gothwad Store - shared types (Web Store + Console + Admin + Android API ek hi shape)
+// Kiwi Store - shared types (Web Store + Console + Admin + Android API ek hi shape)
 export type AppStatus = 'draft' | 'in_review' | 'published' | 'unlisted' | 'suspended';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 export type StorageProvider = 'github' | 'imgbb';

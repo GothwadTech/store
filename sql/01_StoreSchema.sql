@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════
--- GOTHWAD STORE - SQL File 01: StoreSchema
+-- KIWI STORE - SQL File 01: StoreSchema
 -- ⚠️ SIRF Store ke APNE Supabase project me chalao (sql/README.md pehle padho).
 --    Accounts / Mail ke projects me BILKUL NAHI.
 --

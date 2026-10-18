@@ -1,4 +1,4 @@
-# 📘 SETUP.md — Gothwad Store deploy (step-by-step, human ke liye)
+# 📘 SETUP.md — Kiwi Store deploy (step-by-step, human ke liye)
 
 Saara deployment **Cloudflare** par hai. Order wahi rakho jo neeche hai —
 aadhe steps dashboard ke hain jo sirf owner kar sakta hai.
@@ -19,7 +19,7 @@ and live Worker/API data only; backend failure does not fall back to samples.
 
 ## Step 1 — Supabase (Store ka APNA project)
 
-1. [supabase.com](https://supabase.com) → **New project**, naam: `gothwad-store`
+1. [supabase.com](https://supabase.com) → **New project**, naam: `kiwi-store`
    ⚠️ Dhyaan: free plan me per-organization **2 active projects** ki limit hoti
    hai — Accounts + Mail pehle se hain to pehle wali org/plan check kar lena.
 2. SQL Editor → is repo ki `sql/01_StoreSchema.sql` poori chala do
@@ -32,11 +32,11 @@ and live Worker/API data only; backend failure does not fall back to samples.
 Accounts ke Supabase me (`ecosystem_apps` table) ek row:
 
 ```sql
--- id / client_id = 'gothwad-store', scopes: profile email offline_access
+-- id / client_id = 'kiwi-store', scopes: profile email offline_access
 -- redirect_uris = ARRAY[
---   'https://store.gothwadtech.com/auth/callback',
---   'https://console.gothwadtech.com/auth/callback',
---   'https://storeadmin.gothwadtech.com/auth/callback',
+--   'https://kiwistore.gothwadtech.com/auth/callback',
+--   'https://kiwiconsole.gothwadtech.com/auth/callback',
+--   'https://kiwiadmin.gothwadtech.com/auth/callback',
 --   'http://localhost:3000/auth/callback' ]
 ```
 
@@ -52,10 +52,16 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
 ## Step 4 — Cloudflare Pages (chaaro sites, ek project)
 
 1. Workers & Pages → Create → **Pages** → is repo (`GothwadTech/store`) jodo.
-2. Build: command `npm run build`, output `dist`. (koi env abhi zaroori nahi)
+2. Build: command `npm run build`, output `dist`.
+   Env zaroori nahi — defaults `shared/brand.ts` me hain (`Kiwi Store` +
+   `kiwistore/kiwiconsole/kiwiadmin/kiwiapp.gothwadtech.com`). Domain ya
+   naam badalna ho to Pages → Settings → Environment variables me sirf yeh dal do:
+   `VITE_APP_NAME`, `VITE_APP_DOMAIN` (ya per-site `VITE_STORE_URL` /
+   `VITE_CONSOLE_URL` / `VITE_ADMIN_URL` / `VITE_STOREAPP_URL`). Poora list
+   `.env.example` me hai — code change ki zaroorat nahi.
 3. Custom domains — **chaaro** is ek project par lagao:
-   `store.gothwadtech.com` · `console.gothwadtech.com` ·
-   `storeadmin.gothwadtech.com` · `storeapp.gothwadtech.com`
+   `kiwistore.gothwadtech.com` · `kiwiconsole.gothwadtech.com` ·
+   `kiwiadmin.gothwadtech.com` · `kiwiapp.gothwadtech.com`
    (Frontend hostname dekh kar khud sahi site khol lega.)
    Chaaro domain **one-level** subdomain hain, isiliye Cloudflare ka free
    **Universal SSL** (`*.gothwadtech.com`) chaaro ko cover kar deta hai —
@@ -65,6 +71,9 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
 
 1. `worker/wrangler.toml` me `SUPABASE_URL` me Step 1 wala URL dalo,
    GitHub storefiles owner/repo values check karo. `name = "store"` mat badalna.
+   Naam/domain wale vars (`APP_NAME`, `APP_DOMAIN`, `STORE_HOST`, `CONSOLE_HOST`,
+   `ADMIN_HOST`, `STOREAPP_HOST`, `OAUTH_CLIENT_ID`) dashboard → Worker →
+   Settings → Variables se bhi badal sakte ho — code me kuch hardcode nahi hai.
 2. Secrets (dashboard → Worker → Settings → Variables → **Secret** type, ya CLI):
    ```bash
    npm run worker:secrets:list   # sirf naam dikhte hain
@@ -73,18 +82,18 @@ Accounts ke Supabase me (`ecosystem_apps` table) ek row:
    npx wrangler secret put GITHUB_FILES_TOKEN --config worker/wrangler.toml
    ```
 3. Routes (Worker → Settings → Domains & Routes → Add route) — **chaaro**:
-   `store.gothwadtech.com/api/*` · `console.gothwadtech.com/api/*` ·
-   `storeadmin.gothwadtech.com/api/*` · `storeapp.gothwadtech.com/api/*`
+   `kiwistore.gothwadtech.com/api/*` · `kiwiconsole.gothwadtech.com/api/*` ·
+   `kiwiadmin.gothwadtech.com/api/*` · `kiwiapp.gothwadtech.com/api/*`
 4. Deploy: `npm run worker:deploy` (ya Git auto-deploy Workers Builds se).
-5. Check: `https://store.gothwadtech.com/api/health` →
+5. Check: `https://kiwistore.gothwadtech.com/api/health` →
    `configured` me sab `true` aana chahiye.
 
 ## Step 6 — Pehla asli chakkar (live test)
 
-1. `console.gothwadtech.com` → Gothwad Account se sign in → developer bano
+1. `kiwiconsole.gothwadtech.com` → Gothwad Account se sign in → developer bano
 2. Ek test app + signed APK (≤50MB — GitHub upload/progress test hoga)
-3. `storeadmin.gothwadtech.com` (ADMIN_USERNAMES wala username) → Approve
-4. `store.gothwadtech.com` par app dikhe → Download → phone par install ✓
+3. `kiwiadmin.gothwadtech.com` (ADMIN_USERNAMES wala username) → Approve
+4. `kiwistore.gothwadtech.com` par app dikhe → Download → phone par install ✓
 
 > Admin kaun hai: `worker/wrangler.toml` ka `ADMIN_USERNAMES` (comma separated
 > Accounts usernames). Pehla naam owner ka rakho.

@@ -1,7 +1,7 @@
-# 🧑‍💻 DEVELOPER GUIDE — Gothwad Store par app kaise publish karein
+# 🧑‍💻 DEVELOPER GUIDE — Kiwi Store par app kaise publish karein
 
 ## 1. Developer bano
-`console.gothwadtech.com` kholo → **Sign in with Gothwad** (wahi account jo
+`kiwiconsole.gothwadtech.com` kholo → **Sign in with Gothwad** (wahi account jo
 Mail/Drive me hai) → ek-baar ki developer registration (naam, organisation,
 support email). Koi fees nahi hai.
 
@@ -31,7 +31,7 @@ Har naya APK pehle admin review se guzrega (Play Store jaisa):
 - Khatarnak permissions (SMS, contacts, accessibility) ka kaaran saaf hai
 - **Pirated / mod APK hargiz nahi** — aisi app reject + developer ban hoga
 
-Approve → app `store.gothwadtech.com` par live. Reject → admin ka kaaran
+Approve → app `kiwistore.gothwadtech.com` par live. Reject → admin ka kaaran
 Console me dikhega, sudhaar karke phir submit kar do. Listing ke text/photo
 wale badlav bina review live hote hain; APK hamesha review se hi jayega.
 

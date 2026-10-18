@@ -1,6 +1,6 @@
 # 🤝 HANDOVER.md — New AI / New Chat? Start Here.
 
-> **This is the single context file for Gothwad Store.** If you are a new AI
+> **This is the single context file for Kiwi Store.** If you are a new AI
 > session (or a human) picking up this repo, read this file first — it tells
 > you what the product is, which decisions are locked, what is already built
 > and verified, and exactly what remains. You do **not** need any previous
@@ -19,16 +19,16 @@
 
 ## 1. What This Product Is
 
-**Gothwad Store** — the official app store of the Gothwad ecosystem
+**Kiwi Store** — the official app store of the Gothwad ecosystem
 (think: Google's single-account ecosystem, but Gothwad's). One repo,
 one frontend build, one API, four websites:
 
 | Site | Production domain | Purpose |
 |------|-------------------|---------|
-| 🛍️ Web Store | `store.gothwadtech.com` | Play-Store-style storefront: browse, search, app pages, reviews, downloads |
-| 🧑‍💻 Developer Console | `console.gothwadtech.com` | Indus/Play-Console-style publishing console for developers |
-| 🛡️ Admin | `storeadmin.gothwadtech.com` | Manual review queue, app suspend/restore, user reports |
-| 📱 Store App page | `storeapp.gothwadtech.com` | Landing page to download the Gothwad Store **Android** app |
+| 🛍️ Web Store | `kiwistore.gothwadtech.com` | Play-Store-style storefront: browse, search, app pages, reviews, downloads |
+| 🧑‍💻 Developer Console | `kiwiconsole.gothwadtech.com` | Indus/Play-Console-style publishing console for developers |
+| 🛡️ Admin | `kiwiadmin.gothwadtech.com` | Manual review queue, app suspend/restore, user reports |
+| 📱 Store App page | `kiwiapp.gothwadtech.com` | Landing page to download the Kiwi Store **Android** app |
 
 The Android app itself is a **separate repo** (`GothwadTech/storeapp`,
 Kotlin/Compose). It is only a client — it must consume **this repo's Worker API**.
@@ -55,17 +55,17 @@ them away:
    frontends/workers without owner approval.
    ⚠️ The Worker name `store` must always match the Cloudflare dashboard
    Worker name. Do not rename it. (The OAuth `client_id` is a different
-   thing: **`gothwad-store`**.)
+   thing: **`kiwi-store`**.)
 2. **Authentication = Gothwad Accounts only.** No password system may be built
    in this repo, ever. Flow: cookie SSO (Accounts cookie on
    `.gothwadtech.com`) first, OAuth 2.0 Authorization Code + PKCE (S256)
    fallback. Server-side Accounts calls go to `https://api.gothwadtech.com`
    (custom domain — same-zone rule learned from the Mail project), browser
    links to `https://accounts.gothwadtech.com`. Registration of the
-   `gothwad-store` client in Accounts' `ecosystem_apps` is a pending human
+   `kiwi-store` client in Accounts' `ecosystem_apps` is a pending human
    step (see §7).
 3. **Supabase = database only.** Store gets its **own new Supabase project**
-   (`gothwad-store`), separate from Accounts and Mail. **Supabase Storage is
+   (`kiwi-store`), separate from Accounts and Mail. **Supabase Storage is
    NOT used — no bucket exists and none may be created.** The database holds
    metadata only (500 MB free tier is plenty for that). The service-role key
    lives **only** as a Worker secret; the frontend never talks to Supabase
@@ -108,7 +108,9 @@ them away:
    `IMGBB_API_KEY`, `GITHUB_FILES_TOKEN` (fine-grained, storefiles repo only),
    — Worker secrets (dashboard or `wrangler secret
    put`) or `worker/.dev.vars` locally (git-ignored). Public values live in
-   `worker/wrangler.toml` `[vars]` and root `.env.example` (Vite `VITE_*`).
+   `worker/wrangler.toml` `[vars]` and root `.env.example` (Vite `VITE_*`);
+   app name + domain **defaults** live only in `shared/brand.ts` and are always
+   overridable by those variables.
 
 ---
 
@@ -122,12 +124,14 @@ store/
 ├── README.md              public face + local dev quickstart
 ├── docs/
 │   ├── SETUP.md           step-by-step human deployment (6 steps)
-│   └── DEVELOPER_GUIDE.md how external developers publish (policy included)
+│   ├── DEVELOPER_GUIDE.md how external developers publish (policy included)
+│   └── KIWI_MIGRATION.md  🥝 Gothwad → Kiwi: Pages/Worker/Accounts dashboard steps
 ├── sql/                   🗄️ Supabase SQL — READ sql/README.md FIRST
 │   ├── README.md          run order · idempotency rule · 600–1000 line file rule
 │   └── 01_StoreSchema.sql 12 tables + RLS + category seed (idempotent)
 ├── index.html             SPA entry (theme-color #212121)
-├── public/                manifest.json (PWA), icon.svg, _redirects (SPA fallback)
+├── public/                brand icons (/assets), _redirects (SPA fallback)
+├── shared/                🥝 brand.ts — app name + site domains ka single source of truth
 ├── src/
 │   ├── main.tsx           React root (AppProvider wrapper)
 │   ├── App.tsx            hostname/mode selector + preview mode switcher
@@ -136,17 +140,21 @@ store/
 │   ├── data/seed.ts       sample listings/actions for local/preview only
 │   ├── data/categories.ts category display labels used by the UI
 │   ├── lib/
-│   │   ├── config.ts      domains, mode detection, production/demo host gate
+│   │   ├── config.ts      shared/brand.ts + env (VITE_*) se domains, mode detection, prod/demo gate
 │   │   ├── api.ts         Worker API client (store/dev/admin/uploads, upload flows)
 │   │   ├── auth.ts        Gothwad sign-in (PKCE), /api/me, preview demo identity
 │   │   ├── storage.ts     GitHub APK limit (≤50MB), image preparation/compression
 │   │   ├── router.ts      tiny path router (no react-router dependency)
 │   │   └── AppContext.tsx GLOBAL STATE: apps/releases/reviews/submissions/…
-│   ├── shared/ui.tsx      Logo, AppIcon, Stars, StatusBadge, AppCard/Row, SignInPrompt
+│   ├── shared/ui.tsx      🎨 design system: Button/Card/PageHeader/StatCard/Tabs/Sheet/
+│   │                      EmptyState/Skeleton/Pill/Avatar/AccountMenu/SiteFooter/useToast
+│   │                      + Logo, AppIcon, Stars, StatusBadge, AppCard/Row, SignInPrompt
 │   ├── store/StoreApp.tsx       🛍️ storefront shell
 │   ├── console/ConsoleApp.tsx   🧑‍💻 developer console shell
 │   ├── admin/AdminApp.tsx       🛡️ admin shell
 │   └── landing/StoreAppLanding.tsx 📱 Store Android app download page
+├── tests/                 node:test suites (`npm test`) + brand/domain config guards
+│   └── ui/render-smoke.mjs  built bundle ko jsdom me chala kar 8 surfaces render karta hai
 └── worker/
     ├── wrangler.toml      name="store", public [vars], routes documented inside
     ├── .dev.vars.example  local secret names (no values)
@@ -169,7 +177,7 @@ Verified on 2026-10-16: `npm run build` passes (frontend type-check + Vite),
 (frontend port **36161**, Worker port **8787**, `/api/health` OK through the
 Vite proxy, all four modes return 200).
 
-### 4.1 Storefront (`store.*`, `src/store/StoreApp.tsx`)
+### 4.1 Storefront (`kiwistore.*`, `src/store/StoreApp.tsx`)
 - Home: featured hero, "Top charts" rail, suggested/top-rated/new rows,
   category chips; separate **Apps** and **Games** views (`HomePage kind`)
 - Search (`/search?q=`), category pages, top charts, developer pages
@@ -181,7 +189,7 @@ Vite proxy, all four modes return 200).
 - Library/Wishlist page (`/library`), mobile bottom navigation, desktop top nav
 - PWA manifest + dark `#212121` Play-style layout
 
-### 4.2 Developer Console (`console.*`, `src/console/ConsoleApp.tsx`)
+### 4.2 Developer Console (`kiwiconsole.*`, `src/console/ConsoleApp.tsx`)
 Indus/Play-Console-inspired professional layout:
 - **Shell:** fixed sidebar (grouped nav Overview/Insights/Account, developer
   card, publishing-guide box), top bar (breadcrumb, search, notifications,
@@ -210,7 +218,7 @@ Indus/Play-Console-inspired professional layout:
 - **Reviews:** cross-app review inbox with public replies
 - **Developer profile settings** + read-only Gothwad Account identity card
 
-### 4.3 Admin (`storeadmin.*`, `src/admin/AdminApp.tsx`)
+### 4.3 Admin (`kiwiadmin.*`, `src/admin/AdminApp.tsx`)
 - Gate: non-admin usernames get an explicit "Admin access required" screen
 - **Review queue:** pending submissions with provider/size/submitted info,
   reviewer note field — **Approve and publish** / **Reject** (reject blocked
@@ -218,11 +226,11 @@ Indus/Play-Console-inspired professional layout:
 - **All apps:** status badges, suspend/restore, featured label (read-only)
 - **User reports:** open/resolve/dismiss workflow
 
-### 4.4 Store App landing (`storeapp.*`, `src/landing/StoreAppLanding.tsx`)
+### 4.4 Store App landing (`kiwiapp.*`, `src/landing/StoreAppLanding.tsx`)
 - Hero with phone mock of the store, feature cards, developer CTA
 - Download button wired to the live `com.gothwad.store` release
   (`/api/download/...`), QR code (api.qrserver.com) pointing at
-  `https://storeapp.gothwadtech.com`
+  `https://kiwiapp.gothwadtech.com`
 
 ### 4.5 Cross-cutting behavior (important to know before editing)
 - **Local/preview demo is intentionally retained.** The original seed catalog,
@@ -230,7 +238,8 @@ Indus/Play-Console-inspired professional layout:
   local-only actions are available on localhost and non-production previews.
   Sample APKs are not real and preview releases are never uploaded.
 - **Production is gated synchronously before first render.** `isDemoModeAllowed()`
-  in `src/lib/config.ts` rejects the apex and every `*.gothwadtech.com` host.
+  in `src/lib/config.ts` rejects the apex and every host inside the configured
+  brand zone (`APP_DOMAIN`, default `gothwadtech.com`).
   In those origins the initial state is empty, sample categories/demo user are
   absent (live categories may load from API), demo login and mode-switcher
   controls are hidden, and backend failures never
@@ -242,7 +251,7 @@ Indus/Play-Console-inspired professional layout:
   production authority for admin access.
 - **Mode switching:** production resolves by hostname. Anywhere else
   (localhost, `*.e2b.app` preview) `?mode=store|console|admin|storeapp`
-  wins, then `localStorage gothwad-site-mode`, default `store`. A floating
+  wins, then `localStorage kiwi-site-mode`, default `store`. A floating
   switcher renders only on non-production hosts (`src/App.tsx`).
 - **Auth code is real, not a stub:** `src/lib/auth.ts` implements PKCE S256
   exactly per `GothwadTech/accounts` `docs/OAUTH.md` (authorize →
@@ -284,11 +293,14 @@ the service-role key (which bypasses RLS). **No storage buckets.**
 
 ### 4.8 Session 2 changes (2026-10-16) — admin domain + backend wiring
 
+*(Us waqt ke naam `store` · `console` · `storeadmin` · `storeapp` the; Session 3
+(§4.9) me sab `kiwi*` ho gaye — neeche wale domain references aaj ke naam me hain.)*
+
 - **Admin domain:** purana two-level admin domain →
-  **`storeadmin.gothwadtech.com`** har jagah (hostname detection, SITE_URLS,
+  **`kiwiadmin.gothwadtech.com`** har jagah (hostname detection, SITE_URLS,
   `ADMIN_URL`, Worker routes, docs, OAuth redirect URI
-  `https://storeadmin.gothwadtech.com/auth/callback`). Final chaaro domains:
-  `store` · `console` · `storeadmin` · `storeapp` — sab one-level hain,
+  `https://kiwiadmin.gothwadtech.com/auth/callback`). Final chaaro domains:
+  `kiwistore` · `kiwiconsole` · `kiwiadmin` · `kiwiapp` — sab one-level hain,
   isiliye free Universal SSL kaafi hai (Total TLS ki zaroorat khatm).
 - **Worker CRUD implemented** (§4.6 wali table dekho) — 501 placeholder gaya.
   Worker DB rows ko `types.ts` shapes me map karke deta hai (Android app ke
@@ -308,6 +320,53 @@ the service-role key (which bypasses RLS). **No storage buckets.**
 
 ---
 
+### 4.9 Session 3 changes (2026-10-18) — Kiwi Store rebrand + config-driven domains
+
+- **Product renamed:** `Gothwad Store` → **`Kiwi Store`** (short name `Kiwi`).
+  The Gothwad ecosystem, Gothwad Accounts and the ecosystem app names
+  (Browser, Manager, TV Launcher) are unchanged on owner instruction — only the
+  store product itself was renamed.
+- **Domains changed** (same Pages project, same Worker, same Supabase project):
+  `store.` → `kiwistore.` · `console.` → `kiwiconsole.` ·
+  `storeadmin.` → `kiwiadmin.` · `storeapp.` → `kiwiapp.`
+  Migration checklist: `docs/KIWI_MIGRATION.md`.
+- **Nothing is hardcoded any more.** `shared/brand.ts` is the single source of
+  truth for the app name, the four site hosts and the Accounts URLs; it is
+  imported by `src/lib/config.ts` (browser), `vite.config.ts` (fills the
+  `%TOKEN%s` in `index.html` and generates `manifest.json`) and
+  `worker/src/index.ts` (CORS origins + user-facing strings). Change a domain
+  or the name with env variables only: `VITE_APP_DOMAIN` / `VITE_APP_NAME` on
+  Pages, `APP_DOMAIN` / `APP_NAME` / `*_HOST` on the Worker.
+- **`public/manifest.json` was deleted** — `manifest.json` is now generated at
+  build time (and served by the dev server) from the brand config, so the PWA
+  name follows `VITE_APP_NAME`.
+- **OAuth `client_id` renamed** `gothwad-store` → `kiwi-store`; the Accounts
+  `ecosystem_apps` row must be updated with the new id and the four new
+  redirect URIs (`docs/KIWI_MIGRATION.md` step 4).
+- Verified: `npm run lint`, `npm run build` (dist/index.html + dist/manifest.json
+  checked) and `npm test` — 26 tests, including the new `tests/brand-config.test.mjs`
+  which fails if any production URL or brand string is hardcoded again.
+
+### 4.10 Session 3b (2026-10-18) — `kiwiapp` host + UI design-system pass
+
+- **Store App domain:** `kiwistoreapp.gothwadtech.com` → **`kiwiapp.gothwadtech.com`**
+  (owner decision; `DEFAULT_SITE_HOSTS.storeapp` + `STOREAPP_HOST` + docs).
+- **Design system:** `src/shared/ui.tsx` ab chaaro surfaces ka single UI layer hai —
+  `Button` (5 variants), `Card`, `PageHeader`, `StatCard`, `Tabs`, `Sheet` (mobile
+  drawer), `EmptyState`, `Skeleton`, `Pill`, `Avatar`, `AccountMenu`, `SiteFooter`,
+  `useToast`. Console/Admin ke local `Card`/`PageHeader`/`StatCard` copies hat gaye.
+- **Responsive pass:** Store me desktop nav + mobile bottom bar (active pill),
+  account dropdown (pehle avatar click = instant sign-out tha), rails par
+  scroll-snap, skeletons, sticky mobile install bar, footer. Console/Admin me
+  hamburger + `Sheet` drawer, tables ka mobile card view, `alert()` → toast.
+  Landing (kiwiapp) par sticky header, mobile sticky download bar.
+- **`src/index.css`:** focus-visible rings, thin scrollbars, `.panel`, `.rail`,
+  `.safe-bottom`, skeleton shimmer, fade/toast animations, `prefers-reduced-motion`.
+- **New check:** `npm run test:ui` — `vite build` ke baad bundle ko jsdom me chala
+  kar 8 surfaces (store, app detail, library, console dashboard/releases/stats,
+  admin, landing) render karta hai aur mobile+desktop markers assert karta hai
+  (devDependency: `jsdom`).
+
 ## 5. How To Run It Locally
 
 ```bash
@@ -321,7 +380,7 @@ npx vite --port=36161 --host=0.0.0.0 --strictPort   # terminal 2 — current pre
   (bottom center, non-production only) to jump between the four sites.
 - Click **Demo** or **Explore demo mode** on localhost/preview to sign in as
   `pawan` (demo developer + admin) without a backend. Listings, local actions,
-  and profile state persist in this browser; clear `gothwad-store-state-v1` and
+  and profile state persist in this browser; clear `kiwi-store-state-v1` and
   `gothwad-demo-user` to reset. Sample APK actions are simulations only and do
   not upload a file. On production domains the demo identity and seeded UI are
   gated off before the first render; real auth uses Gothwad Accounts.
@@ -342,10 +401,10 @@ for exactly that reason).
 
 ### 6.1 Human / dashboard deployment — OWNER ONLY, blocks production
 Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
-1. Create the `gothwad-store` Supabase project (⚠️ free plan: 2 active
+1. Create the `kiwi-store` Supabase project (⚠️ free plan: 2 active
    projects per org — Accounts + Mail already exist; check org/plan first)
    and run `sql/01_StoreSchema.sql`.
-2. Register the `gothwad-store` client in **Accounts'** `ecosystem_apps`
+2. Register the `kiwi-store` client in **Accounts'** `ecosystem_apps`
    (redirect URIs for all four `/auth/callback`s + localhost).
 3. Create keys: ImgBB API key; GitHub fine-grained PAT for `storefiles`.
 4. Cloudflare Pages: connect this repo (`npm run build` → `dist`), attach
@@ -393,9 +452,9 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
    counts. Console daily statistics now call the Worker `/stats` endpoint and
    display recorded download counts (no generated chart values).
 8. **Android integration (separate repo):** replace `DummyStoreData` in
-   `GothwadTech/storeapp` with this API (`https://store.gothwadtech.com/api`),
+   `GothwadTech/storeapp` with this API (`https://kiwistore.gothwadtech.com/api`),
    mapping responses onto its existing `AppItem` fields; Android login uses
-   the same `gothwad-store` OAuth client (add its redirect URI in Accounts).
+   the same `kiwi-store` OAuth client (add its redirect URI in Accounts).
 
 ### 6.3 Known limitations / risks (do not rediscover these)
 - **Free tiers bite in specific places:** Supabase 500 MB DB / 1 GB
@@ -431,12 +490,16 @@ Full checklists live in [`docs/SETUP.md`](docs/SETUP.md). Summary:
 3. **Never** put secrets in code, `wrangler.toml`, or git; never expose the
    service-role key or provider keys to the browser (uploads go through the
    Worker or its signed URLs).
-4. Domains and hosts come from config (`src/lib/config.ts`,
-   `worker/wrangler.toml` `[vars]`) — do not hardcode production domains in
-   components, and do not call `localhost` from browser code.
-5. UI copy stays **US English**; theme stays **#212121**; console components
-   reuse the `Card`/`StatCard`/table vocabulary rather than inventing new
-   card styles per page.
+4. Domains, hosts and the app name come from **`shared/brand.ts`** (defaults) +
+   env (`VITE_*` for Pages, `[vars]` for the Worker) via `src/lib/config.ts`.
+   Never hardcode a production domain, host or brand string in a component, in
+   `index.html`, or in the Worker — `tests/brand-config.test.mjs` fails if you
+   do. And do not call `localhost` from browser code.
+5. UI copy stays **US English**; theme stays **#212121**. Naye UI ke liye
+   `src/shared/ui.tsx` ke primitives use karo (`Button`, `Card`, `PageHeader`,
+   `StatCard`, `Tabs`, `EmptyState`, `Sheet`, `useToast`) — har page par apne
+   button/card classes invent mat karo. Har surface phone aur desktop dono par
+   test karo (`npm run test:ui`).
 6. Git: work only on the session branch you were given; run §5 checks before
    pushing; keep commits descriptive. (`main` moves only through PRs.)
 7. When in doubt about auth, copy `GothwadTech/accounts` `docs/OAUTH.md` —

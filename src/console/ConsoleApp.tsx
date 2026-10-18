@@ -1,24 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, BarChart3, Bell, CheckCircle2, ChevronRight, CircleAlert, Download,
-  FileUp, HelpCircle, ImagePlus, LayoutDashboard, LogOut, MessageSquareText,
-  LoaderCircle, PackagePlus, Plus, RotateCcw, Search, Settings, Smartphone, Star, UploadCloud, X,
+  ArrowLeft, BarChart3, CheckCircle2, ChevronRight, CircleAlert, Download,
+  FileUp, HelpCircle, ImagePlus, LayoutDashboard, MessageSquareText,
+  LoaderCircle, Menu, PackagePlus, Plus, RotateCcw, Settings, Smartphone, Star, UploadCloud, X,
 } from 'lucide-react';
 import { useApp } from '../lib/AppContext';
 import { usePath } from '../lib/router';
-import { AppIcon, Logo, SignInPrompt, StatusBadge, categoryName } from '../shared/ui';
+import {
+  AccountMenu, AppIcon, Avatar, Card, EmptyState, Logo, PageHeader, Sheet, SignInPrompt, StatCard,
+  Stars, StatusBadge, Tabs, categoryName, cx,
+} from '../shared/ui';
 import { BackendNotice } from '../shared/BackendNotice';
 import { APK_GITHUB_LIMIT_BYTES, assertApkFile, formatBytes, formatCount, prepareImage } from '../lib/storage';
 import { devApi, inspectApk, uploadApk, uploadImage } from '../lib/api';
 import type { ApkManifestInfo, UploadedApk } from '../lib/api';
 import type { StoreApp as StoreAppType } from '../types';
+import { ACCOUNTS_HOST, APP_NAME, APP_SHORT_NAME, SITE_HOSTS } from '../lib/config';
 
 // ── Design tokens (dark, neutral #212121 - Material-style console) ──
 const inputCls = 'w-full rounded-lg border border-white/10 bg-[#1e1e1e] px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-500 transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/15';
 const labelCls = 'mb-1.5 block text-[13px] font-medium text-neutral-300';
 const hintCls = 'mt-1 text-xs leading-relaxed text-neutral-500';
-const btnPrimary = 'inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40';
-const btnGhost = 'inline-flex items-center justify-center gap-2 rounded-lg border border-white/12 bg-transparent px-4 py-2 text-sm font-medium text-neutral-200 transition hover:bg-white/5 disabled:opacity-40';
+// Button class strings shared/ui se aate hain (chaaro surfaces ek jaise dikhein).
+import { btnGhost, btnPrimary } from '../shared/ui';
 
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -29,129 +33,123 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-function Card({ title, desc, children, action }: { title?: string; desc?: string; children: React.ReactNode; action?: React.ReactNode }) {
-  return (
-    <section className="rounded-xl border border-white/[0.08] bg-[#2a2a2a] shadow-sm">
-      {(title || action) && (
-        <header className="flex flex-wrap items-start gap-3 border-b border-white/[0.06] px-5 py-4">
-          <div className="min-w-0 flex-1">
-            {title && <h2 className="text-[15px] font-semibold text-white">{title}</h2>}
-            {desc && <p className="mt-0.5 text-[13px] text-neutral-400">{desc}</p>}
-          </div>
-          {action}
-        </header>
-      )}
-      <div className="px-5 py-5">{children}</div>
-    </section>
-  );
-}
-
-function PageHeader({ title, desc, children }: { title: string; desc?: string; children?: React.ReactNode }) {
-  return (
-    <div className="mb-6 flex flex-wrap items-start gap-4">
-      <div className="min-w-0 flex-1">
-        <h1 className="text-[22px] font-semibold tracking-tight text-white sm:text-2xl">{title}</h1>
-        {desc && <p className="mt-1 max-w-2xl text-sm text-neutral-400">{desc}</p>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function StatCard({ label, value, sub, icon: Icon }: { label: string; value: string; sub: string; icon: typeof Download }) {
-  return (
-    <div className="rounded-xl border border-white/[0.08] bg-[#2a2a2a] p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-[13px] font-medium text-neutral-400">{label}</p>
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-500/12 text-emerald-300"><Icon size={16} /></span>
-      </div>
-      <p className="mt-2 font-display text-[26px] font-semibold leading-none text-white">{value}</p>
-      <p className="mt-1.5 text-xs text-neutral-500">{sub}</p>
-    </div>
-  );
-}
-
 // ════════════════ SHELL ════════════════
+type NavItem = [string, string, typeof LayoutDashboard];
+
+function ConsoleNav({ groups, isActive, navigate, onNavigate, layout }: {
+  groups: { heading: string; items: NavItem[] }[];
+  isActive: (to: string) => boolean;
+  navigate: (p: string) => void;
+  onNavigate?: () => void;
+  layout: 'sidebar' | 'drawer';
+}) {
+  const drawer = layout === 'drawer';
+  return (
+    <nav className={cx('px-3 py-3', drawer ? 'space-y-4' : 'no-scrollbar flex gap-1 overflow-x-auto lg:block lg:flex-1 lg:space-y-5 lg:overflow-y-auto lg:py-4')} aria-label="Console sections">
+      {groups.map((g) => (
+        <div key={g.heading} className={cx(drawer ? 'block' : 'flex gap-1 lg:block')}>
+          <p className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{g.heading}</p>
+          {g.items.map(([to, label, Icon]) => (
+            <button key={to} onClick={() => { navigate(to); onNavigate?.(); }} aria-current={isActive(to) ? 'page' : undefined}
+              className={cx('mb-0.5 flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition',
+                drawer ? 'w-full' : 'shrink-0 lg:w-full',
+                isActive(to) ? 'bg-emerald-500/15 font-semibold text-emerald-200' : 'text-neutral-300 hover:bg-white/[0.05] hover:text-white')}>
+              <Icon size={17} className={isActive(to) ? 'text-emerald-300' : 'text-neutral-500'} /> {label}
+            </button>
+          ))}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+const CRUMB_LABELS: [string, string][] = [
+  ['/apps/new', 'Create app'],
+  ['/stats', 'Statistics'],
+  ['/reviews', 'Reviews'],
+  ['/settings', 'Developer profile'],
+  ['/onboarding', 'Get started'],
+];
+
 function Shell({ children, navigate, path }: { children: React.ReactNode; navigate: (p: string) => void; path: string }) {
-  const { user, developer, signOut } = useApp();
-  const groups: { heading: string; items: [string, string, typeof LayoutDashboard][] }[] = [
+  const { user, developer } = useApp();
+  const [drawer, setDrawer] = useState(false);
+  const groups: { heading: string; items: NavItem[] }[] = [
     { heading: 'Overview', items: [['/', 'Dashboard', LayoutDashboard], ['/apps/new', 'Create app', PackagePlus]] },
     { heading: 'Insights', items: [['/stats', 'Statistics', BarChart3], ['/reviews', 'Reviews', MessageSquareText]] },
     { heading: 'Account', items: [['/settings', 'Developer profile', Settings]] },
   ];
   const isActive = (to: string) => (to === '/' ? path === '/' : path.startsWith(to));
+  const crumb = path === '/' ? 'Dashboard'
+    : path.startsWith('/apps/') && path !== '/apps/new' ? 'App'
+      : CRUMB_LABELS.find(([to]) => path.startsWith(to))?.[1] ?? 'Console';
+
+  const developerCard = developer && (
+    <div className="mx-3 mt-3 flex items-center gap-3 rounded-xl border border-white/[0.07] bg-[#242424] px-3.5 py-3">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 font-display text-sm font-bold text-[#08130e]">
+        {(developer.orgName || developer.displayName).charAt(0).toUpperCase()}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-white">{developer.orgName || developer.displayName}</span>
+        <span className="block truncate text-xs text-neutral-500">@{developer.username}</span>
+      </span>
+    </div>
+  );
+
   return (
-    <div className="min-h-dvh bg-[#212121] text-neutral-200 lg:flex">
-      {/* Sidebar */}
-      <aside className="z-30 border-b border-white/[0.07] bg-[#1d1d1d] lg:sticky lg:top-0 lg:flex lg:h-dvh lg:w-[264px] lg:shrink-0 lg:flex-col lg:border-b-0 lg:border-r">
-        <div className="flex h-16 items-center border-b border-white/[0.06] px-5">
-          <Logo subtitle="Developer Console" />
-        </div>
-        {developer && (
-          <div className="mx-3 mt-3 hidden items-center gap-3 rounded-xl border border-white/[0.07] bg-[#262626] px-3.5 py-3 lg:flex">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#333] font-display text-sm font-semibold text-white">
-              {(developer.orgName || developer.displayName).charAt(0).toUpperCase()}
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-medium text-white">{developer.orgName || developer.displayName}</span>
-              <span className="block truncate text-xs text-neutral-500">@{developer.username}</span>
-            </span>
-          </div>
-        )}
-        <nav className="no-scrollbar flex gap-1 overflow-x-auto px-3 py-3 lg:block lg:flex-1 lg:space-y-5 lg:overflow-y-auto lg:py-4">
-          {groups.map((g) => (
-            <div key={g.heading} className="flex gap-1 lg:block">
-              <p className="hidden px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500 lg:block">{g.heading}</p>
-              {g.items.map(([to, label, Icon]) => (
-                <button key={to} onClick={() => navigate(to)}
-                  className={`flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition lg:mb-0.5 lg:w-full ${isActive(to) ? 'bg-emerald-600/15 font-medium text-emerald-200' : 'text-neutral-300 hover:bg-white/[0.05] hover:text-white'}`}>
-                  <Icon size={17} className={isActive(to) ? 'text-emerald-300' : 'text-neutral-500'} /> {label}
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <div className="hidden border-t border-white/[0.06] p-4 lg:block">
-          <div className="rounded-xl bg-[#262626] p-3.5">
+    <div className="flex min-h-dvh flex-col bg-[#212121] text-neutral-200 lg:flex-row">
+      {/* Desktop sidebar */}
+      <aside className="sticky top-0 hidden h-dvh w-[268px] shrink-0 flex-col border-r border-white/[0.07] bg-[#1b1b1b] lg:flex">
+        <div className="flex h-16 items-center border-b border-white/[0.06] px-5"><Logo subtitle="Developer Console" /></div>
+        {developerCard}
+        <ConsoleNav groups={groups} isActive={isActive} navigate={navigate} layout="sidebar" />
+        <div className="border-t border-white/[0.06] p-4">
+          <div className="rounded-xl bg-[#242424] p-3.5">
             <p className="flex items-center gap-1.5 text-[13px] font-medium text-white"><HelpCircle size={15} className="text-emerald-300" /> Publishing guide</p>
             <p className="mt-1 text-xs leading-relaxed text-neutral-500">Listing requirements, review policy, and APK upload rules (GitHub storefiles, up to 50 MB).</p>
           </div>
         </div>
       </aside>
 
+      {/* Mobile top bar + drawer */}
+      <div className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-white/[0.07] bg-[#1b1b1b]/95 px-4 backdrop-blur-xl lg:hidden">
+        <button onClick={() => setDrawer(true)} className="rounded-lg p-2 text-neutral-300 transition hover:bg-white/5 hover:text-white" aria-label="Open console menu">
+          <Menu size={20} />
+        </button>
+        <Logo subtitle="Console" />
+        <div className="ml-auto">{user ? <AccountMenu size={34} /> : <Avatar name="?" size={34} />}</div>
+      </div>
+      <Sheet open={drawer} onClose={() => setDrawer(false)} title="Console menu">
+        {developerCard}
+        <ConsoleNav groups={groups} isActive={isActive} navigate={navigate} onNavigate={() => setDrawer(false)} layout="drawer" />
+        <div className="border-t border-white/[0.06] p-4">
+          <p className="text-xs leading-relaxed text-neutral-500">Listing requirements, review policy, and APK upload rules (GitHub storefiles, up to 50 MB).</p>
+        </div>
+      </Sheet>
+
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-white/[0.07] bg-[#212121]/95 px-4 backdrop-blur sm:px-6">
-          <p className="hidden text-sm text-neutral-500 md:block">
-            Console <span className="mx-1.5 text-neutral-600">/</span>
-            <span className="font-medium text-neutral-200">{path === '/' ? 'Dashboard' : path === '/apps/new' ? 'Create app' : path === '/stats' ? 'Statistics' : path === '/reviews' ? 'Reviews' : path === '/settings' ? 'Developer profile' : 'App'}</span>
+        <header className="hidden h-16 items-center gap-3 border-b border-white/[0.07] bg-[#212121]/95 px-6 backdrop-blur lg:flex">
+          <p className="flex items-center gap-1.5 text-sm text-neutral-500">
+            Console <ChevronRight size={14} className="text-neutral-700" />
+            <span className="font-medium text-neutral-200">{crumb}</span>
           </p>
-          <div className="ml-auto flex items-center gap-2">
-            <label className="hidden items-center gap-2 rounded-lg border border-white/[0.08] bg-[#2a2a2a] px-3 py-2 xl:flex">
-              <Search size={15} className="text-neutral-500" />
-              <input placeholder="Search apps" className="w-44 bg-transparent text-sm text-white outline-none placeholder:text-neutral-500" />
-            </label>
-            <button className="relative grid h-9 w-9 place-items-center rounded-lg text-neutral-400 transition hover:bg-white/5 hover:text-white" aria-label="Notifications">
-              <Bell size={18} /><span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            </button>
-            <span className="mx-1 hidden h-6 w-px bg-white/10 sm:block" />
-            <span className="hidden items-center gap-2.5 sm:flex">
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-[#3a3a3a] font-display text-sm font-semibold text-white">{user?.name.charAt(0)}</span>
-              <span className="hidden leading-tight 2xl:block">
-                <span className="block max-w-[150px] truncate text-[13px] font-medium text-white">{user?.name}</span>
-                <span className="block max-w-[150px] truncate text-[11px] text-neutral-500">{user?.email}</span>
+          <div className="ml-auto flex items-center gap-3">
+            <span className="hidden items-center gap-2.5 xl:flex">
+              <span className="max-w-[190px] leading-tight">
+                <span className="block truncate text-[13px] font-medium text-white">{user?.name}</span>
+                <span className="block truncate text-[11px] text-neutral-500">{user?.email}</span>
               </span>
             </span>
-            <button onClick={signOut} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-neutral-400 transition hover:bg-white/5 hover:text-white">
-              <LogOut size={16} /> <span className="hidden md:inline">Sign out</span>
-            </button>
+            <span className="h-6 w-px bg-white/10" />
+            <AccountMenu size={36} />
           </div>
         </header>
         <div className="mx-auto w-full max-w-[1180px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
           <BackendNotice />
           {children}
         </div>
-        <footer className="border-t border-white/[0.06] px-6 py-4 text-xs text-neutral-600">Gothwad Developer Console · console.gothwadtech.com</footer>
+        <footer className="border-t border-white/[0.06] px-4 py-4 text-xs text-neutral-600 sm:px-6">{APP_SHORT_NAME} Developer Console · {SITE_HOSTS.console}</footer>
       </div>
     </div>
   );
@@ -191,7 +189,7 @@ function Onboarding() {
           </div>
           <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-white/[0.08] bg-[#242424] px-3.5 py-3 text-[13px] leading-relaxed text-neutral-300">
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-0.5 accent-emerald-500" />
-            I agree to the Gothwad Store Developer Policy. I confirm that my apps are my own work, are not pirated or modified versions of paid apps, and do not collect user data without disclosure.
+            I agree to the {APP_NAME} Developer Policy. I confirm that my apps are my own work, are not pirated or modified versions of paid apps, and do not collect user data without disclosure.
           </label>
           <div className="flex justify-end gap-2.5 border-t border-white/[0.06] pt-4">
             <button disabled={!agree || saving} className={btnPrimary}>{saving ? <><LoaderCircle size={16} className="animate-spin" /> Creating profile…</> : 'Create developer profile'}</button>
@@ -232,7 +230,29 @@ function Dashboard({ navigate }: { navigate: (p: string) => void }) {
 
       <Card title="Your apps" desc={mine.length ? `${mine.length} app${mine.length > 1 ? 's' : ''} on this developer profile` : undefined}>
         {mine.length ? (
-          <div className="-mx-5 -my-2 overflow-x-auto">
+          <>
+          {/* Mobile: card list */}
+          <div className="-mx-5 -my-2 divide-y divide-white/[0.06] md:hidden">
+            {mine.map((a) => { const live = liveReleaseOf(a.id); return (
+              <button key={a.id} onClick={() => navigate(`/apps/${a.id}`)} className="flex w-full items-center gap-3 px-5 py-4 text-left transition hover:bg-white/[0.03]">
+                <AppIcon app={a} size={44} rounded="rounded-xl" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-white">{a.name}</span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-neutral-500">
+                    <span>{live ? `v${live.versionName}` : 'No release'}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{formatCount(a.downloadsCount)} downloads</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="flex items-center gap-1"><Star size={11} /> {a.ratingCount ? a.ratingAvg.toFixed(1) : '—'}</span>
+                  </span>
+                  <span className="mt-1.5 block"><StatusBadge status={a.status} /></span>
+                </span>
+                <ChevronRight size={16} className="shrink-0 text-neutral-600" />
+              </button>
+            );})}
+          </div>
+          {/* Desktop: table */}
+          <div className="-mx-5 -my-2 hidden overflow-x-auto md:block">
             <table className="w-full min-w-[760px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-white/[0.07] text-xs uppercase tracking-wide text-neutral-500">
@@ -259,13 +279,11 @@ function Dashboard({ navigate }: { navigate: (p: string) => void }) {
               </tbody>
             </table>
           </div>
+          </>
         ) : (
-          <div className="py-10 text-center">
-            <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-[#333] text-neutral-400"><Smartphone size={22} /></span>
-            <p className="mt-3 font-medium text-white">No apps yet</p>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-neutral-500">Create your first app listing, upload an APK, and submit it for review.</p>
-            <button onClick={() => navigate('/apps/new')} className={`${btnPrimary} mt-4`}><Plus size={16} /> Create app</button>
-          </div>
+          <EmptyState icon={Smartphone} title="No apps yet"
+            desc="Create your first app listing, upload an APK, and submit it for review. Every release is reviewed before it goes live."
+            action={<button onClick={() => navigate('/apps/new')} className={btnPrimary}><Plus size={16} /> Create app</button>} />
         )}
       </Card>
     </main>
@@ -505,7 +523,6 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
     inspectSelectedApk(apk.file);
   };
 
-  const tabs: [typeof tab, string][] = [['listing', 'Store listing'], ['releases', `Releases`], ['reviews', `Reviews`]];
 
   return (
     <main>
@@ -528,15 +545,16 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
       {msg && <p className="mb-5 flex gap-2 rounded-xl border border-emerald-400/25 bg-emerald-500/[0.08] px-4 py-3 text-sm text-emerald-200"><CheckCircle2 size={18} className="shrink-0" /> {msg}</p>}
       {error && <p className="mb-5 rounded-xl border border-red-400/25 bg-red-500/[0.08] px-4 py-3 text-sm text-red-200"><b>Error:</b> {error}</p>}
 
-      <div className="mb-6 flex gap-1 border-b border-white/[0.08]">
-        {tabs.map(([t, l]) => (
-          <button key={t} onClick={() => navigate(t === 'listing' ? `/apps/${app.id}` : `/apps/${app.id}/${t}`)}
-            className={`relative px-4 py-2.5 text-sm transition ${tab === t ? 'font-medium text-white' : 'text-neutral-400 hover:text-neutral-200'}`}>
-            {l}{t === 'reviews' && appReviews.length > 0 ? ` (${appReviews.length})` : t === 'releases' && appReleases.length > 0 ? ` (${appReleases.length})` : ''}
-            {tab === t && <span className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-emerald-500" />}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="mb-6"
+        value={tab}
+        onChange={(t) => navigate(t === 'listing' ? `/apps/${app.id}` : `/apps/${app.id}/${t}`)}
+        tabs={[
+          { id: 'listing', label: 'Store listing' },
+          { id: 'releases', label: 'Releases', count: appReleases.length },
+          { id: 'reviews', label: 'Reviews', count: appReviews.length },
+        ]}
+      />
 
       {tab === 'listing' && (
         <form onSubmit={(event) => {
@@ -560,7 +578,7 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
           }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Store listing could not be saved.')).finally(() => setListingSaving(false));
         }}>
           <div className="space-y-5">
-            <Card title="App details" desc="How your app appears on Gothwad Store.">
+            <Card title="App details" desc={`How your app appears on ${APP_NAME}.`}>
               <div className="space-y-5">
                 <div className="grid gap-5 sm:grid-cols-2">
                   <div><label className={labelCls}>App name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} required /></div>
@@ -615,10 +633,10 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
               </div>
             </Card>
 
-            <div className="sticky bottom-4 flex flex-wrap justify-end gap-2.5 rounded-xl border border-white/[0.08] bg-[#2a2a2a]/95 px-4 py-3 shadow-xl shadow-black/30 backdrop-blur">
-              <button type="button" disabled={listingSaving || !!imageUpload} onClick={() => { setForm(app); setShots(app.screenshots); setIconName(''); }} className={btnGhost}>Discard changes</button>
-              <button type="submit" value="continue" disabled={listingSaving || !!imageUpload} className={btnPrimary}>{listingSaving ? <><LoaderCircle size={15} className="animate-spin" /> Saving…</> : <>Save & continue to APK <ChevronRight size={15} /></>}</button>
-              <button type="submit" value="save" disabled={listingSaving || !!imageUpload} className={btnGhost}>{listingSaving ? <><LoaderCircle size={15} className="animate-spin" /> Saving…</> : 'Save listing'}</button>
+            <div className="sticky bottom-4 z-20 flex flex-col gap-2.5 rounded-xl border border-white/[0.08] bg-[#2a2a2a]/95 px-4 py-3 shadow-xl shadow-black/40 backdrop-blur sm:flex-row sm:justify-end">
+              <button type="button" disabled={listingSaving || !!imageUpload} onClick={() => { setForm(app); setShots(app.screenshots); setIconName(''); }} className={`${btnGhost} sm:order-1`}>Discard changes</button>
+              <button type="submit" value="save" disabled={listingSaving || !!imageUpload} className={`${btnGhost} sm:order-2`}>{listingSaving ? <><LoaderCircle size={15} className="animate-spin" /> Saving…</> : 'Save listing'}</button>
+              <button type="submit" value="continue" disabled={listingSaving || !!imageUpload} className={`${btnPrimary} sm:order-3`}>{listingSaving ? <><LoaderCircle size={15} className="animate-spin" /> Saving…</> : <>Save & continue to APK <ChevronRight size={15} /></>}</button>
             </div>
           </div>
         </form>
@@ -705,7 +723,34 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
 
           <Card title="Release history" desc={live ? `Currently live: v${live.versionName} (${live.versionCode})` : 'Nothing is live yet. Your first approved release will appear here.'}>
             {appReleases.length ? (
-              <div className="-mx-5 -my-2 overflow-x-auto">
+              <>
+              {/* Mobile: cards */}
+              <div className="-mx-5 -my-2 divide-y divide-white/[0.06] md:hidden">
+                {appReleases.map((release) => (
+                  <div key={release.id} className="px-5 py-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <b className="text-sm text-white">v{release.versionName}</b>
+                      <span className="text-xs text-neutral-500">({release.versionCode})</span>
+                      {release.isLive && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-300 ring-1 ring-emerald-400/25">Live</span>}
+                      <span className={`ml-auto text-xs font-semibold ${release.reviewStatus === 'approved' ? 'text-emerald-300' : release.reviewStatus === 'rejected' ? 'text-red-300' : 'text-amber-300'}`}>
+                        {release.reviewStatus === 'approved' ? 'Approved' : release.reviewStatus === 'rejected' ? 'Rejected' : 'Pending'}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-neutral-500">
+                      <span>{formatBytes(release.apkSizeBytes)}</span><span aria-hidden="true">·</span>
+                      <span>GitHub</span><span aria-hidden="true">·</span>
+                      <span>{formatCount(release.downloads)} downloads</span>
+                    </p>
+                    {release.reviewStatus === 'rejected' && release.reviewNote && <p className="mt-1.5 text-xs text-neutral-400">“{release.reviewNote}”</p>}
+                    {release.reviewStatus === 'pending' && app.status !== 'in_review' && (
+                      <button onClick={() => { setError(''); void submitForReview(app.id, release.id).then(() => setMsg('Submitted for review. Once an admin approves it, this version will go live.')).catch((reason: Error) => setError(reason.message)); }}
+                        className="mt-3 rounded-lg bg-amber-500 px-3.5 py-2 text-xs font-semibold text-black transition hover:bg-amber-400">Submit for review</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {/* Desktop: table */}
+              <div className="-mx-5 -my-2 hidden overflow-x-auto md:block">
                 <table className="w-full min-w-[720px] border-collapse text-left text-sm">
                   <thead><tr className="border-b border-white/[0.07] text-xs uppercase tracking-wide text-neutral-500">
                     <th className="px-5 py-2.5 font-semibold">Version</th><th className="px-3 py-2.5 font-semibold">Size</th><th className="px-3 py-2.5 font-semibold">Storage</th>
@@ -727,7 +772,8 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
                   </tbody>
                 </table>
               </div>
-            ) : <p className="py-6 text-center text-sm text-neutral-500">No releases yet. Upload your first APK above.</p>}
+              </>
+            ) : <EmptyState icon={UploadCloud} title="No releases yet" desc="Upload your first signed APK above. Every release is reviewed by an administrator before it goes live." />}
           </Card>
         </div>
       )}
@@ -737,15 +783,15 @@ function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: st
           {appReviews.map((r) => (
             <section key={r.id} className="rounded-xl border border-white/[0.08] bg-[#2a2a2a] px-5 py-4">
               <div className="flex items-center gap-2.5">
-                <span className="grid h-8 w-8 place-items-center rounded-full bg-[#3a3a3a] text-xs font-semibold text-white">{r.username.charAt(0).toUpperCase()}</span>
+                <Avatar name={r.username} size={32} />
                 <b className="text-sm text-white">@{r.username}</b>
-                <span className="text-amber-300">{'★'.repeat(r.rating)}<span className="text-neutral-700">{'★'.repeat(5 - r.rating)}</span></span>
+                <Stars value={r.rating} size={12} />
                 <span className="ml-auto text-xs text-neutral-600">{new Date(r.createdAt).toLocaleDateString('en-US')}</span>
               </div>
               <p className="mt-2.5 text-sm leading-relaxed text-neutral-300">{r.body}</p>
               {r.developerReply
                 ? <p className="mt-3 rounded-lg bg-[#242424] px-3.5 py-2.5 text-[13px] text-neutral-300"><b className="text-emerald-300">Your reply: </b>{r.developerReply}</p>
-                : <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); setError(''); void replyReview(r.id, replyDraft[r.id] ?? '').then(() => setReplyDraft((current) => ({ ...current, [r.id]: '' }))).catch((reason: Error) => setError(reason.message)); }}>
+                : <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); setError(''); void replyReview(r.id, replyDraft[r.id] ?? '').then(() => setReplyDraft((current) => ({ ...current, [r.id]: '' }))).catch((reason: Error) => setError(reason.message)); }}>
                     <input value={replyDraft[r.id] ?? ''} onChange={(e) => setReplyDraft({ ...replyDraft, [r.id]: e.target.value })} placeholder="Reply as the developer…" className={inputCls} />
                     <button className={`${btnPrimary} shrink-0`}>Reply</button>
                   </form>}
@@ -858,10 +904,10 @@ function ReviewsPage() {
             <p className="text-xs text-neutral-500">{a?.name} · <span className="font-medium text-neutral-300">@{r.username}</span></p>
             <p className="mt-1.5 text-sm leading-relaxed text-neutral-200">{r.body}</p>
             {!r.developerReply
-              ? <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); setError(''); void replyReview(r.id, draft[r.id] ?? '').then(() => setDraft((current) => ({ ...current, [r.id]: '' }))).catch((reason: Error) => setError(reason.message)); }}><input value={draft[r.id] ?? ''} onChange={(e) => setDraft({ ...draft, [r.id]: e.target.value })} className={inputCls} placeholder="Write a public reply…" /><button className={`${btnPrimary} shrink-0`}>Reply</button></form>
+              ? <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); setError(''); void replyReview(r.id, draft[r.id] ?? '').then(() => setDraft((current) => ({ ...current, [r.id]: '' }))).catch((reason: Error) => setError(reason.message)); }}><input value={draft[r.id] ?? ''} onChange={(e) => setDraft({ ...draft, [r.id]: e.target.value })} className={inputCls} placeholder="Write a public reply…" /><button className={`${btnPrimary} shrink-0`}>Reply</button></form>
               : <p className="mt-2.5 text-[13px] text-neutral-400"><b className="text-emerald-300">You: </b>{r.developerReply}</p>}
           </section>);})}
-        {!mine.length && <Card><p className="py-8 text-center text-sm text-neutral-500">No reviews yet.</p></Card>}
+        {!mine.length && <Card><EmptyState icon={MessageSquareText} title="No reviews yet" desc="Reviews from users across all of your apps will appear here, and you can reply publicly." /></Card>}
       </div>
     </main>
   );
@@ -900,7 +946,7 @@ function SettingsPage() {
             <div><dt className="text-neutral-500">Username</dt><dd className="mt-0.5 font-medium text-white">@{user?.username}</dd></div>
             <div><dt className="text-neutral-500">Email</dt><dd className="mt-0.5 font-medium text-white">{user?.email}</dd></div>
           </dl>
-          <p className={hintCls}>To change your name, password, or security settings, visit accounts.gothwadtech.com.</p>
+          <p className={hintCls}>To change your name, password, or security settings, visit {ACCOUNTS_HOST}.</p>
         </Card>
       </div>
     </main>

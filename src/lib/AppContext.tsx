@@ -8,8 +8,8 @@ import { isDemoModeAllowed } from './config';
 import { adminApi, ApiError, devApi, fetchCatalog, fetchSession, userApi } from './api';
 import type { ApkManifestInfo, CatalogStatus } from './api';
 
-const LS_KEY = 'gothwad-store-state-v1';
-const DEMO_USER_KEY = 'gothwad-demo-user';
+const LS_KEY = 'kiwi-store-state-v1';
+const DEMO_USER_KEY = 'kiwi-demo-user';
 
 interface AppState {
   apps: StoreApp[];
