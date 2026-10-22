@@ -1,22 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { createLocalD1 } from '../tools/local-d1.mjs';
 import { moduleUrl } from './helpers/ts.mjs';
 
-// Run the real Worker handler with mocked Accounts/Supabase, without a deployment.
-const apkUrl = await moduleUrl('worker/src/apk.ts');
-const brandUrl = await moduleUrl('shared/brand.ts');
 const workerUrl = await moduleUrl('worker/src/index.ts');
-// Worker ke relative imports ko inline karo (apk + shared brand config).
-const workerSource = Buffer.from(workerUrl.split(',')[1], 'base64')
-  .toString()
-  .replace("'./apk'", JSON.stringify(apkUrl))
-  .replace("'../../shared/brand'", JSON.stringify(brandUrl));
-const { default: worker } = await import(`data:text/javascript;base64,${Buffer.from(workerSource).toString('base64')}`);
-
-const env = {
-  AUTH_HUB_URL: 'https://accounts.test', SUPABASE_URL: 'https://database.test',
-  SUPABASE_SERVICE_ROLE_KEY: 'test-only', ADMIN_USERNAMES: '',
-};
+const { default: worker } = await import(workerUrl);
+const bootstrapSql = await readFile(new URL('../sql/00_d1_console_bootstrap.sql', import.meta.url), 'utf8');
 
 for (const scenario of [
   { label: 'Draft listing without status', current: 'draft', body: {}, expected: 200 },
@@ -28,43 +18,55 @@ for (const scenario of [
   { label: 'Actual transition to draft is still forbidden', current: 'in_review', body: { status: 'draft' }, expected: 400, error: 'bad_request' },
 ]) {
   test(scenario.label, async (t) => {
-    let app = { id: 'app-test', developer_id: 'dev-test', name: 'Before', status: scenario.current };
-    const developer = { id: 'dev-test', user_id: 'user-test' };
-    const writes = [];
-    t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const DB = createLocalD1();
+    await DB.exec(bootstrapSql);
+    await DB.prepare(
+      `INSERT INTO developers (id, user_id, username, display_name, org_name, support_email)
+       VALUES ('dev-test', 'user-test', 'tester', 'Tester', 'Tester', 'dev@example.test')`,
+    ).run();
+    await DB.prepare(
+      `INSERT INTO apps (
+        id, developer_id, package_name, name, status, category, kind,
+        short_desc, full_desc, icon_url, support_email
+      ) VALUES (
+        'app-test', 'dev-test', 'com.example.app', 'Before', ?, 'tools', 'app',
+        '', '', '', 'dev@example.test'
+      )`,
+    ).bind(scenario.current).run();
+
+    const env = { DB, AUTH_HUB_URL: 'https://accounts.test', ADMIN_USERNAMES: '' };
+    t.mock.method(globalThis, 'fetch', async (input) => {
       const url = new URL(input);
-      if (url.href === `${env.AUTH_HUB_URL}/oauth/userinfo`) {
+      if (url.pathname.endsWith('/userinfo')) {
         return Response.json({ sub: 'user-test', preferred_username: 'tester' });
       }
-      assert.equal(url.origin, env.SUPABASE_URL);
-      const table = url.pathname.split('/').at(-1);
-      if (init.method === 'PATCH') {
-        assert.equal(table, 'apps');
-        const patch = JSON.parse(init.body);
-        writes.push(patch);
-        app = { ...app, ...patch };
-        return Response.json([app]);
-      }
-      if (table === 'apps') return Response.json([app]);
-      if (table === 'developers') return Response.json([developer]);
-      assert.ok(['app_screenshots', 'app_releases', 'reviews'].includes(table), `Unexpected table: ${table}`);
-      return Response.json([]); // No live/approved release exists.
+      assert.fail(`Unexpected fetch: ${url.href}`);
     });
-    const response = await worker.fetch(new Request('https://console.test/api/dev/apps/app-test', {
-      method: 'PATCH', headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'After', shortDesc: 'Updated listing', ...scenario.body }),
-    }), env);
+
+    const response = await worker.fetch(
+      new Request('https://console.test/api/dev/apps/app-test', {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'After', shortDesc: 'Updated listing', ...scenario.body }),
+      }),
+      env,
+    );
     const result = await response.json();
     assert.equal(response.status, scenario.expected, JSON.stringify(result));
     if (scenario.expected === 200) {
       assert.equal(result.app.name, 'After');
       assert.equal(result.app.shortDesc, 'Updated listing');
       assert.equal(result.app.status, scenario.current);
-      assert.equal(writes.length, 1);
-      assert.equal(Object.hasOwn(writes[0], 'status'), false);
+      const saved = await DB.prepare('SELECT name, short_desc, status FROM apps WHERE id = ?').bind('app-test').first();
+      assert.equal(saved.name, 'After');
+      assert.equal(saved.short_desc, 'Updated listing');
+      assert.equal(saved.status, scenario.current);
     } else {
       assert.equal(result.error, scenario.error);
-      assert.equal(writes.length, 0);
+      const saved = await DB.prepare('SELECT name, status FROM apps WHERE id = ?').bind('app-test').first();
+      assert.equal(saved.name, 'Before');
+      assert.equal(saved.status, scenario.current);
     }
+    DB.close();
   });
 }

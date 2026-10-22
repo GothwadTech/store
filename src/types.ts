@@ -1,7 +1,7 @@
 // Kiwi Store - shared types (Web Store + Console + Admin + Android API ek hi shape)
 export type AppStatus = 'draft' | 'in_review' | 'published' | 'unlisted' | 'suspended';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
-export type StorageProvider = 'github' | 'imgbb';
+export type StorageProvider = 'github' | 'd1';
 
 export interface Developer {
   id: string;
@@ -49,7 +49,7 @@ export interface StoreApp {
   status: AppStatus;
   shortDesc: string;
   fullDesc: string;
-  /** Images hamesha ImgBB par (PLAN SS6) */
+  /** Images Cloudflare D1 `store_images` + Edge Cache (`/api/images/:id`) par */
   iconUrl: string;
   iconColor: string;
   featureGraphicUrl?: string;
@@ -107,12 +107,31 @@ export interface ReportItem {
   createdAt: string;
 }
 
+export interface AccountSlotItem {
+  id: string;
+  slot?: string;
+  authuser: number;
+  username: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
+  email: string;
+  avatarUrl?: string | null;
+  picture?: string | null;
+  accountUrl?: string;
+  lastUsedAt?: string;
+  active?: boolean;
+}
+
 export interface GothwadUser {
   id: string;
   username: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   picture?: string;
+  avatarUrl?: string;
 }
 
 export interface Category {

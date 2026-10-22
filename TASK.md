@@ -1,154 +1,42 @@
 # 📋 TASK.md — Kiwi Store live status
 
-**Last updated:** 2026-10-18 (🥝 Kiwi Store rebrand + domains config-driven; dashboard steps `docs/KIWI_MIGRATION.md`) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
+**Last updated:** 2026-10-22 (100% Zero-Card Cloudflare D1 + D1 BLOB Edge Cache CDN + Multi-Account SSO complete) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
 
-## ✅ Ho gaya (Session 1 — 2026-10-16)
+## ✅ Session 4 (2026-10-22) — 100% Zero-Card Cloudflare D1 + Edge Cache Image CDN + Multi-Account SSO
 
-- [x] PLAN.md — poora design (Accounts/Mail pattern par)
-- [x] Repo skeleton — Vite + React 19 + TS + Tailwind 4 (Mail stack)
-- [x] **Store** (`kiwistore.*`) — Play-look home, Apps/Games, search, category, charts,
-      app detail (screenshots/reviews/wishlist/download), library, developer page
-- [x] **Developer Console** (`kiwiconsole.*`) — onboarding, dashboard, create app
-      (package unique check), listing editor (ImgBB images), APK release upload
-      (GitHub storefiles, ≤50MB, live byte progress), submit-for-review, stats, review reply
-- [x] **Admin** (`kiwiadmin.*`) — manual review queue (approve/reject+note),
-      all-apps suspend/restore, user reports. Sirf `ADMIN_USERNAMES` wale
-- [x] **StoreApp landing** (`kiwiapp.*`) — Store Android app download page + QR
-- [x] Ek SPA, hostname se shell switch; preview/local me neeche mode-switcher
-- [x] Auth — "Sign in with Gothwad" PKCE flow + Worker `/api/me` (cookie/Bearer);
-      optional local/preview demo account is host-gated off all production domains
-- [x] Worker `store` (`worker/`) — health, me, OAuth exchange, public store API,
-      download counter+redirect, resilient ImgBB image upload, GitHub Releases APK upload (≤50MB)
-- [x] Supabase SQL `sql/01_StoreSchema.sql` — 12 tables + RLS + categories
-      (Storage bucket NAHI banta — pakka faisla)
-- [x] `npm run build` + worker typecheck saaf
+- [x] **Supabase & ImgBB poori tarah hataye (Zero-Card / Zero-R2):**
+  - Cloudflare D1 (`database_name = "store"`, `database_id = "a3dc3e71-cf89-4e0a-89d1-693fcf6f227a"`, `binding = "DB"`, `keep_vars = true`) `worker/wrangler.toml` me wired.
+  - Legacy Postgres `sql/01_StoreSchema.sql` delete karke D1 SQLite migrations banaye:
+    - `sql/00_d1_console_bootstrap.sql` (100% comment-free, `PRAGMA`-free idempotent SQL — Cloudflare D1 Console paste ke liye).
+    - `sql/01_store_schema.sql` (13 tables + indexes + 12 categories + 5 official Gothwad ecosystem apps seed).
+- [x] **D1 `store_images` BLOB + Cloudflare Edge Cache (`caches.default`) Image CDN:**
+  - Browser (`src/lib/imageUpload.ts`) PNG/JPG/WebP images ko Canvas se `≤ 380 KB` WebP me compress karta hai.
+  - Worker (`worker/src/routes/media.ts`) binary magic bytes (`RIFF..WEBP`, `PNG`, `JPEG`) verify karta hai, SHA-256 se deduplicate karta hai, D1 `store_images` BLOB table me save karta hai, aur canonical absolute URL `https://store.gothwadtech.com/api/images/<id>?v=<sha256_prefix>` return karta hai.
+  - `GET /api/images/:id` Cloudflare `caches.default` (Edge Cache) + `Cache-Control: public, max-age=31536000, immutable` + `ETag` (`304 Not Modified`) ke saath serve hota hai.
+- [x] **Modular Worker Architecture (`<= 500` lines per file):**
+  - `worker/src/types.ts`, `worker/src/http.ts`, `worker/src/db.ts`, `worker/src/mappers.ts`, `worker/src/auth.ts`, `worker/src/apk.ts`, `worker/src/index.ts`
+  - `worker/src/routes/store-public.ts`, `worker/src/routes/store-user.ts`, `worker/src/routes/media.ts`, `worker/src/routes/console.ts`, `worker/src/routes/admin.ts`
+  - Supports both `/api/dev/*` and `/api/console/*` routes plus `/api/admin/overview`, `/api/admin/submissions/:id/(approve|reject)`, `/api/admin/apps/:id/(suspend|restore|unsuspend|feature)`, and `store_audit_log`.
+- [x] **Web & Android Auth + Multi-Account SSO Fixes:**
+  - `shared/brand.ts`: `accountsApiUrl = 'https://api.gothwadtech.com'` (fixes OAuth `/oauth/authorize` 404 when previously hitting `accounts.gothwadtech.com`).
+  - Web uses `.gothwadtech.com` HttpOnly SSO cookies (`credentials: 'include'`) + `/u/0..5` URL prefix (`src/lib/router.ts`) + `X-Gothwad-Authuser` header forwarding (`src/lib/api.ts`) + `AccountMenu` multi-account switcher (`src/shared/AccountMenu.tsx`).
+  - Worker (`worker/src/auth.ts`) forwards rotated `Set-Cookie` headers from Accounts `/api/auth/me` via `res.headers.getSetCookie()`, distinguishes Accounts `5xx`/network errors (`503`) from `401`/`403`, and supports `Authorization: Bearer <token>` for the Android `storeapp`.
+  - Zero OAuth tokens stored in `localStorage` or `sessionStorage`.
+  - Added `/auth/callback` route handling to `src/admin/AdminApp.tsx`.
+- [x] **Strict `<= 500` Lines Per File Enforcement & Automated Test Suite:**
+  - Split oversized frontend/worker/doc files into clean modules (`<= 500` lines each).
+  - Created `tools/local-d1.mjs` (`node:sqlite` `DatabaseSync` D1 adapter), `tests/d1-store-api.test.mjs`, and `tests/filesize-and-integrity.test.mjs`.
+  - Updated `tests/no-demo-catalog.test.mjs`, `tests/console-upload-guard.test.mjs`, and `tests/listing-save.test.mjs` to run against real SQLite (`LocalD1Database`).
 
-## ✅ Session 2 (2026-10-16) — Admin domain + asli backend wiring
+## ✅ Previous Sessions Summary (Sessions 1–3)
 
-- [x] **APK GitHub repo ka naam theek kiya:** asal repo naam `storefiles` hai
-      (bina dash ke) — `GITHUB_FILES_REPO = "storefiles"` (wrangler.toml)
-      sahit codebase ke saare repo-name references `store-files` →
-      `storefiles`. (File paths/technical dashes ko haath nahi lagaya;
-      `sql/` me repo naam tha hi nahi — wahan provider value `github` hai.)
-- [x] **Admin domain badla:** purana two-level admin domain → one-level
-      `storeadmin.gothwadtech.com` har jagah (config.ts hostname detection +
-      SITE_URLS, wrangler.toml ADMIN_URL + routes, saari docs). Us waqt ke chaaro
-      domains: `store` · `console` · `storeadmin` · `storeapp` (sab one-level,
-      free Universal SSL kaafi — Total TLS nahi chahiye).
-      ⚠️ Session 3 me naam badal kar `kiwi*` ho gaye — neeche dekho.
-- [x] **Worker CRUD live (code):** `/api/dev/*` (register, apps CRUD + listing
-      + screenshots, releases, submit, stats, review reply) aur `/api/admin/*`
-      (queue, approve/reject+note, suspend/restore, feature, reports) —
-      `sql/01_StoreSchema.sql` ki tables par, ownership/package-uniqueness/
-      version-code/reject-note/download-dedupe rules Worker me. 501 gaya.
-      Saath me user actions: review likhna (1 user = 1 review), wishlist,
-      library, report — Worker responses `types.ts` shapes me map hote hain
-- [x] **Frontend ↔ API wiring:** naya `src/lib/api.ts`; `AppContext` ab
-      Worker se hydrate hota hai (catalog → session/dev/admin bundles).
-      Production backend unconfigured/unavailable ho to empty catalog + clear
-      status notice dikhta hai; local/preview retains sample data and demo-only
-      local persistence. Console ke image uploads `/api/uploads/image` (ImgBB) se, APK flow
-      `/apk` (GitHub-only, ≤50MB, progress
-      ke saath) se jud gaya
-- [x] **APK manifest auto-read:** `worker/src/apk.ts` — ZIP + binary
-      AndroidManifest.xml se package/versionCode/versionName/min/target SDK/
-      permissions + SHA-256; console form auto-fill, package mismatch par
-      Worker 400. Synthetic APK (stored + deflated) se test pass
-- [x] `public/_redirects` SPA fallback (andar ke pages refresh par 404 nahi)
-- [x] Store ke ek bache hue Hinglish UI string ko US English kiya
-- [x] Verify: `npm run build` + worker typecheck pass; mock Supabase/Accounts
-      ke against poora E2E (register→create→release→submit→reject→resubmit→
-      approve→store→review/reply→wishlist/report→download dedupe→stats) pass
+- [x] 4-surface single SPA (`Store`, `Developer Console`, `Store Admin`, `StoreApp Landing`) with hostname auto-detection (`shared/brand.ts` + `src/lib/config.ts`).
+- [x] Synchronous production host gating (`gothwadtech.com` & `*.gothwadtech.com` never show demo fixtures or demo sign-in).
+- [x] Binary `AndroidManifest.xml` APK parser (`worker/src/apk.ts`) + GitHub `GothwadTech/storefiles` release uploader (`≤ 50 MB`).
+- [x] Responsive UI design system (`src/shared/ui.tsx`) verified by `npm run test:ui` across 8 mobile & desktop surfaces.
 
-## ✅ Draft listing save fix (2026-10-16)
+## 🔜 Next Owner Dashboard Steps (`docs/SETUP.md`)
 
-- [x] Worker listing PATCH me current status ke barabar bheja gaya status no-op
-      hai; guard sirf actual transition par lagta hai. Bina live release ke
-      `draft → published` ab bhi reject hota hai.
-- [x] Console listing-save ab sirf editable listing fields + screenshots bhejta
-      hai, poora app/status nahi. Publish/Unpublish ka alag flow unchanged hai.
-- [x] `npm test` regression suite (Node 22.13+): Draft listing without status /
-      same status saves; in-review/published same-status saves; unauthorized
-      status transitions aur publish without live release reject hote hain.
-      Accounts/Supabase mocked hain; production services ki zaroorat nahi.
-- [x] Verify: `npm test` (6 tests), `npm run build`, aur
-      `npx tsc -p worker/tsconfig.json --noEmit` pass.
-
-## ✅ Session 3 (2026-10-16) — Preview-only demo; production stays API-only
-
-- [x] Retained seeded apps/reviews/submissions/reports, local persistence, demo
-      sign-in, and simulated preview actions on localhost/non-production previews.
-- [x] Synchronously gates seed state, demo identity, demo buttons, preview
-      notices, and the mode switcher by hostname before React's first render;
-      the apex and every `*.gothwadtech.com` host start empty and use Gothwad auth only.
-- [x] Production backend unconfigured/unavailable stays empty/API-only; write
-      actions cannot silently fall back to local state. Preview demo writes stay
-      local and do not upload APKs or alter the live GitHub upload flow.
-- [x] Real API statistics/download behavior in production and explicit backend
-      status notices; only the local demo uses labeled illustrative stats.
-      Sample APK URLs stay blank.
-- [x] Worker blocks developers from restoring suspended apps and blocks direct
-      downloads of pending releases or releases whose app is not published.
-- [x] Verified corrected tree: `npm run lint`, `npm test` (12 tests), and
-      `npm run build` pass.
-
-## 🔎 Review findings / potential improvements
-
-- [ ] Add fetch timeouts/abort handling and distinguish auth network/5xx errors
-      from a genuine signed-out session; a stalled Worker request can leave
-      initial loading open-ended.
-- [ ] Validate/version the preview `localStorage` state shape and cap or move
-      image data URLs (screenshots) to IndexedDB to avoid corrupted state or
-      quota-related loss.
-- [ ] Add a browser-level regression test that opens production-host mode
-      with stale demo storage and verifies no demo UI on the first paint; the
-      current regression test checks the synchronous guards statically.
-- [ ] After owner-only service setup, smoke-test Accounts cookie/OAuth, live
-      catalog, ImgBB, and GitHub uploads end-to-end.
-
-## ✅ Session 3 (2026-10-18) — 🥝 Kiwi Store rebrand + config-driven domains
-
-- [x] **Product rename:** `Gothwad Store` → **`Kiwi Store`** (short name `Kiwi`) —
-      UI copy, `index.html` SEO tags, PWA manifest, Worker messages, docs.
-      Gothwad Accounts / Gothwad ecosystem / ecosystem app names **waise hi** hain.
-- [x] **Domains:** `store.` → `kiwistore.` · `console.` → `kiwiconsole.` ·
-      `storeadmin.` → `kiwiadmin.` · `storeapp.` → `kiwiapp.`
-- [x] **Zero hardcoding:** `shared/brand.ts` = naam + domains ka single source of
-      truth. Browser (`src/lib/config.ts`), build (`vite.config.ts` → `index.html`
-      `%TOKEN%` + generated `manifest.json`) aur Worker (`worker/src/index.ts` →
-      CORS + copy) sab wahi se padhte hain. Override: Pages `VITE_*`, Worker `[vars]`.
-- [x] `public/manifest.json` hataya — ab build/dev me brand config se generate hota hai
-- [x] OAuth `client_id`: `gothwad-store` → `kiwi-store`
-- [x] Browser/worker storage keys `gothwad-*` → `kiwi-*` (preview state + tokens)
-- [x] Naya test `tests/brand-config.test.mjs` (brand/domain config + no-hardcode guard);
-      `npm run lint` + `npm run build` + `npm test` (26 tests) saaf
-
-- [x] **Store App host:** `kiwistoreapp.*` → **`kiwiapp.gothwadtech.com`**
-- [x] **UI design-system pass (phone + desktop):** `src/shared/ui.tsx` me shared
-      primitives (Button/Card/PageHeader/StatCard/Tabs/Sheet/EmptyState/Skeleton/
-      Pill/Avatar/AccountMenu/SiteFooter/useToast); Store me desktop nav + mobile
-      bottom bar + account dropdown + sticky install bar + skeletons + footer;
-      Console/Admin me hamburger drawer, tables ka mobile card view, `alert()` → toast;
-      landing par sticky header + mobile download bar
-- [x] `npm run test:ui` — build ke baad jsdom me 8 surfaces render + responsive markers
-
-### 🔜 Is rebrand ke dashboard steps (owner) — `docs/KIWI_MIGRATION.md`
-
-- [ ] Pages: chaaro naye custom domains add karo — `kiwistore` · `kiwiconsole` · `kiwiadmin` · `kiwiapp` (purane abhi rehne do)
-- [ ] Worker `store`: chaaro naye `/api/*` routes + naye vars (`npm run worker:deploy`)
-- [ ] Accounts `ecosystem_apps`: `client_id` → `kiwi-store` + chaaro naye redirect URIs
-- [ ] Verify (health, sign-in, upload→approve→download, PWA naam)
-- [ ] Old → new 301 redirect rules, phir purane domains/routes remove
-
-## 🔜 Agla (owner ke human steps pehle — docs/SETUP.md)
-
-- [ ] Supabase project `kiwi-store` banao → SQL chalao → keys Worker me
-- [ ] Accounts ke `ecosystem_apps` me `kiwi-store` register karo (SETUP §2;
-      chaaro `/auth/callback` redirect URIs, admin wala
-      `https://kiwiadmin.gothwadtech.com/auth/callback` sahit)
-- [ ] GitHub repo `GothwadTech/storefiles` (owner bana raha hai) + PAT
-- [ ] ImgBB API key · GitHub storefiles fine-grained token
-- [ ] Cloudflare: Pages project (4 custom domains) + Worker `store` (4 routes)
-- [ ] Live test: console upload → admin approve → store download → phone install
-- [ ] Auth hardening: asli Accounts cookie SSO chaaro subdomains par test
-- [ ] `storeapp` (Android) me DummyStoreData hata kar yahi API lagao
+- [ ] Run `sql/00_d1_console_bootstrap.sql` in Cloudflare D1 Console (`store`, `a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`) or via `npx wrangler d1 execute store --remote --file=sql/01_store_schema.sql --config worker/wrangler.toml`.
+- [ ] Ensure `GITHUB_TOKEN` secret is set on Worker `store` for `GothwadTech/storefiles` APK uploads.
+- [ ] Deploy Worker (`npm run worker:deploy`) and verify `https://store.gothwadtech.com/api/health` returns `engine: "cloudflare-d1"` and `configured.d1: true`.

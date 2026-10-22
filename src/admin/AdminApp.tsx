@@ -4,9 +4,10 @@ import {
   ShieldCheck, Star, X,
 } from 'lucide-react';
 import { useApp } from '../lib/AppContext';
+import { usePath } from '../lib/router';
 import {
-  AppIcon, Avatar, Button, Card, EmptyState, Logo, PageHeader, Pill, Sheet, SignInPrompt, StatCard,
-  StatusBadge, Tabs, cx, useToast,
+  AccountMenu, AppIcon, AuthCallbackView, Button, Card, EmptyState, Logo, PageHeader, Pill, Sheet,
+  SignInPrompt, StatCard, StatusBadge, Tabs, cx, useToast,
 } from '../shared/ui';
 import { BackendNotice } from '../shared/BackendNotice';
 import { apkProviderLabel, formatBytes, formatCount } from '../lib/storage';
@@ -66,6 +67,7 @@ function NavList({ tab, setTab, counts, onNavigate }: { tab: Tab; setTab: (t: Ta
 
 export default function AdminApp() {
   const { apps, submissions, reports, decideSubmission, setAppStatus, resolveReport, user, signOut } = useApp();
+  const [path, navigate] = usePath();
   const [tab, setTab] = useState<Tab>('queue');
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [drawer, setDrawer] = useState(false);
@@ -78,6 +80,10 @@ export default function AdminApp() {
   const counts: Record<Tab, number> = { queue: pending.length, apps: apps.length, reports: openReports.length };
 
   const fail = (err: Error) => show(err.message || 'That action could not be completed.', 'error');
+
+  if (path === '/auth/callback') {
+    return <div className="min-h-dvh bg-[#212121]"><AuthCallbackView onDone={() => navigate('/')} /></div>;
+  }
 
   return (
     <Gate>
@@ -109,7 +115,7 @@ export default function AdminApp() {
             <Menu size={20} />
           </button>
           <Logo subtitle="Store Admin" />
-          <span className="ml-auto"><Avatar name={user?.name ?? 'A'} size={34} /></span>
+          <span className="ml-auto"><AccountMenu size={34} /></span>
         </div>
         <Sheet open={drawer} onClose={() => setDrawer(false)} title="Admin menu">
           <div className="px-3 pt-3">

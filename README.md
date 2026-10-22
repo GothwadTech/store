@@ -2,14 +2,15 @@
 
 **Gothwad ecosystem ka app store** — Play Store jaisa web store, Play Console
 jaisa developer console, aur admin panel. Ek hi repo, ek hi Cloudflare Pages
-project, ek hi Worker, ek hi (alag) Supabase project.
+project, ek hi Worker, aur ek **100% Zero-Card Cloudflare D1** SQLite database
+(`store`, `a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`).
 
 | Site | Domain | Kya hai |
 |------|--------|---------|
-| 🛍️ Store | `kiwistore.gothwadtech.com` | Apps/games browse, search, download, reviews |
-| 🧑‍💻 Developer Console | `kiwiconsole.gothwadtech.com` | App publish, listing, releases, stats |
-| 🛡️ Admin | `kiwiadmin.gothwadtech.com` | Manual review queue, suspend, reports |
-| 📱 Store App | `kiwiapp.gothwadtech.com` | Store Android app ka download page |
+| 🛍️ Store | `store.gothwadtech.com` | Apps/games browse, search, download, reviews |
+| 🧑‍💻 Developer Console | `storeconsole.gothwadtech.com` | App publish, listing, releases, stats |
+| 🛡️ Admin | `storeadmin.gothwadtech.com` | Manual review queue, suspend, reports, audit log |
+| 📱 Store App | `storeapp.gothwadtech.com` | Store Android app ka download page |
 
 Android app alag repo [`GothwadTech/storeapp`](https://github.com/GothwadTech/storeapp)
 me hai — backend (Worker API) **yehi** hai.
@@ -23,42 +24,40 @@ me hai — backend (Worker API) **yehi** hai.
 
 | File | Kya milega |
 |------|-----------|
-| [`HANDOVER.md`](HANDOVER.md) | 🤖 **Naya AI/session? SABSE PEHLE YEH PADHO** — poora context, pakke faisle, kya bana/baaki |
-| [`PLAN.md`](PLAN.md) | Poora design — architecture, storage rules, phases |
+| [`HANDOVER.md`](HANDOVER.md) | 🤖 **Naya AI/session? SABSE PEHLE YEH PADHO** — poora context, D1 architecture, multi-account SSO |
+| [`PLAN.md`](PLAN.md) | Poora design — D1 schema, Edge Cache CDN, storage rules, phases |
 | [`TASK.md`](TASK.md) | Live status — kya bana, kya baaki |
-| [`docs/SETUP.md`](docs/SETUP.md) | Step-by-step deploy (Supabase → Accounts → Cloudflare) |
+| [`docs/SETUP.md`](docs/SETUP.md) | Step-by-step deploy (Cloudflare D1 → Accounts → Pages → Worker) |
 | [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) | Bahari developers: app publish kaise karein |
-| [`docs/KIWI_MIGRATION.md`](docs/KIWI_MIGRATION.md) | 🥝 Gothwad Store → Kiwi Store: Pages/Worker/Accounts dashboard steps + future domain change |
+| [`docs/KIWI_MIGRATION.md`](docs/KIWI_MIGRATION.md) | 🥝 Store D1 + Brand / Domain dashboard steps |
 
 ## 🚀 Local dev
 
 ```bash
 npm install
 npm run dev            # → http://localhost:3000 (neeche 4-site switcher milega)
-npm run worker:dev     # dusre terminal me → http://127.0.0.1:8787
+npm run worker:dev     # dusre terminal me → http://127.0.0.1:8787 (local D1 SQLite)
 ```
 
-Production login **Sign in with Gothwad** (Gothwad Accounts OAuth + PKCE —
-`docs/SETUP.md` §2) se hota hai. Localhost aur non-production previews par
-optional **Demo** sign-in, sample listings, and local-only actions remain
-available for development. The apex and every subdomain under
+Production login **Sign in with Gothwad** (`.gothwadtech.com` HttpOnly SSO
+cookies + `/u/0..5` multi-account switcher + OAuth PKCE fallback via
+`https://api.gothwadtech.com`) se hota hai. Localhost aur non-production
+previews par optional **Demo** sign-in, sample listings, and local-only actions
+remain available for development. The apex and every subdomain under
 `gothwadtech.com` are synchronously gated to empty/API-only initial state: no
-demo buttons, fake identity, or seed
-listings render there. If the production Worker/API is unavailable, the catalog
-stays empty and the app shows its backend status.
+demo buttons, fake identity, or seed listings render there.
 
-## 💾 Storage ke pakke niyam
+## 💾 Storage ke pakke niyam (100% Zero-Card)
 
-- **Images** (icon/screenshots/logo) → **ImgBB** sirf
-- **APK ≤ 50 MB** → **GitHub** repo `GothwadTech/storefiles` (Releases)
-- APKs over 50 MB are rejected before upload for a reliable, single-provider flow.
-- **Supabase** → sirf database (500 MB metadata). Storage bucket **nahi** banta.
+- **Database**: **Cloudflare D1** (`store`, `a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`) — 13 SQLite tables. Zero Supabase.
+- **Images** (icon/screenshots/banner): Client-side Canvas WebP (`≤ 380 KB`) → **D1 `store_images` BLOB** + **Cloudflare Edge Cache (`caches.default`)** served from `https://store.gothwadtech.com/api/images/:id` (`Cache-Control: public, max-age=31536000, immutable` + `ETag`). Zero ImgBB, Zero R2.
+- **APK ≤ 50 MB**: **GitHub** repo `GothwadTech/storefiles` (Releases) via Worker upload.
 
 ## 🧪 Checks
 
 ```bash
-npm run lint    # tsc (frontend + worker)
-npm test        # 26 tests - Worker API, demo gating, brand/domain config
+npm run lint    # tsc --noEmit (frontend + worker)
+npm test        # node --test (LocalD1Database SQLite + Worker API + SSO + Image CDN + <=500 line guard)
 npm run test:ui # build + jsdom me 8 surfaces render (mobile + desktop markers)
 npm run build   # dist/index.html + dist/manifest.json brand config se bante hain
 ```

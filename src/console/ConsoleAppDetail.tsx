@@ -1,0 +1,457 @@
+import { useRef, useState } from 'react';
+import {
+  ArrowLeft, CheckCircle2, ChevronRight, FileUp, ImagePlus,
+  LoaderCircle, RotateCcw, UploadCloud, X,
+} from 'lucide-react';
+import { useApp } from '../lib/AppContext';
+import {
+  AppIcon, Avatar, Card, EmptyState, Stars, StatusBadge,
+  Tabs, btnGhost, btnPrimary, categoryName,
+} from '../shared/ui';
+import { APK_GITHUB_LIMIT_BYTES, assertApkFile, formatBytes, formatCount, prepareImage } from '../lib/storage';
+import { inspectApk, uploadApk, uploadImage } from '../lib/api';
+import type { ApkManifestInfo, UploadedApk } from '../lib/api';
+import type { StoreApp as StoreAppType } from '../types';
+import { APP_NAME } from '../lib/config';
+import { hintCls, inputCls, labelCls } from './ConsoleShell';
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read image'));
+    reader.onerror = () => reject(new Error('Could not read image'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function PublishingChecklist({ app, releases, navigate }: { app: StoreAppType; releases: ReturnType<typeof useApp>['releases']; navigate: (path: string) => void }) {
+  const listingReady = !!(app.name.trim() && app.shortDesc.trim() && app.fullDesc.trim() && app.iconUrl && app.screenshots.length >= 2 && app.supportEmail.trim());
+  const hasRelease = releases.some((release) => release.appId === app.id);
+  const pending = releases.find((release) => release.appId === app.id && release.reviewStatus === 'pending');
+  const submitted = app.status === 'in_review' || releases.some((release) => release.appId === app.id && release.reviewStatus === 'approved');
+  const steps = [
+    { label: 'Complete store listing', done: listingReady, to: `/apps/${app.id}` },
+    { label: 'Upload APK release', done: hasRelease, to: `/apps/${app.id}/releases` },
+    { label: submitted ? 'Release submitted' : pending ? 'Submit for review' : 'Submit for review', done: submitted, to: `/apps/${app.id}/releases` },
+  ];
+  const next = steps.find((step) => !step.done);
+  return (
+    <section className="mb-5 rounded-xl border border-emerald-400/15 bg-emerald-500/[0.045] px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-white">Publishing checklist</p>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+            {steps.map((step, index) => <button key={step.label} type="button" onClick={() => navigate(step.to)} className={`inline-flex items-center gap-1.5 text-xs transition hover:text-white ${step.done ? 'text-emerald-300' : 'text-neutral-400'}`}><span className={`grid h-4 w-4 place-items-center rounded-full text-[10px] font-bold ${step.done ? 'bg-emerald-500 text-white' : 'border border-white/20 text-neutral-400'}`}>{step.done ? '✓' : index + 1}</span>{step.label}</button>)}
+          </div>
+        </div>
+        {next && <button type="button" onClick={() => navigate(next.to)} className={`${btnPrimary} shrink-0`}>Continue: {next.label}<ChevronRight size={15} /></button>}
+      </div>
+    </section>
+  );
+}
+
+export function AppDetail({ app, navigate, tab }: { app: StoreAppType; navigate: (p: string) => void; tab: 'listing' | 'releases' | 'reviews' }) {
+  const { updateApp, categories, releases, addRelease, submitForReview, submissions, reviews, replyReview, setAppStatus, liveReleaseOf, backendLive, demoModeAvailable, isDemoUser } = useApp();
+  const isLocalDemo = demoModeAvailable && isDemoUser;
+  const apiMode = backendLive && !isDemoUser;
+  const [form, setForm] = useState(app);
+  const [iconName, setIconName] = useState('');
+  const [shots, setShots] = useState<string[]>(app.screenshots);
+  const [imageUpload, setImageUpload] = useState<{ target: 'icon' | 'shot'; phase: 'Preparing image…' | 'Uploading image…'; progress: number } | null>(null);
+  const [apk, setApk] = useState<{
+    name: string; size: number; file: File; manifest?: ApkManifestInfo | null; sha256?: string;
+    inspection: 'checking' | 'ready' | 'skipped' | 'failed'; inspectError?: string;
+  } | null>(null);
+  const [ver, setVer] = useState({ versionName: '', versionCode: '', changelog: '' });
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [releaseBusy, setReleaseBusy] = useState(false);
+  const [listingSaving, setListingSaving] = useState(false);
+  const [replyDraft, setReplyDraft] = useState<Record<string, string>>({});
+  const inspectAbortRef = useRef<AbortController | null>(null);
+  const selectedApkRef = useRef<File | null>(null);
+  const appReleases = releases.filter((r) => r.appId === app.id).sort((a, b) => b.versionCode - a.versionCode);
+  const appReviews = reviews.filter((r) => r.appId === app.id);
+  const rejected = submissions.find((s) => s.appId === app.id && s.status === 'rejected');
+  const live = liveReleaseOf(app.id);
+  const apkPackageMismatch = !!(apk?.manifest?.packageName && apk.manifest.packageName !== app.packageName);
+  const validVersionCode = Number.isInteger(Number(ver.versionCode)) && Number(ver.versionCode) > 0;
+  const canCreateRelease = !!apk && !!ver.versionName.trim() && validVersionCode && !apkPackageMismatch && !releaseBusy;
+
+  const onImage = async (file: File | undefined, target: 'icon' | 'shot') => {
+    if (!file || imageUpload || (target === 'shot' && shots.length >= 8)) return;
+    setError('');
+    setMsg('');
+    setImageUpload({ target, phase: 'Preparing image…', progress: 0 });
+    try {
+      const prepared = await prepareImage(file, target === 'icon' ? 'icon' : 'screenshot');
+      let url: string;
+      if (isLocalDemo) {
+        url = await blobToDataUrl(prepared.blob);
+      } else {
+        if (!apiMode) throw new Error('Image uploads are unavailable while the Store service is offline.');
+        setImageUpload({ target, phase: 'Uploading image…', progress: 0 });
+        url = await uploadImage(prepared.blob, file.name, {
+          appId: app.id,
+          purpose: target === 'icon' ? 'icon' : 'screenshot',
+          onProgress: (fraction) => setImageUpload({ target, phase: 'Uploading image…', progress: Math.round(fraction * 100) }),
+        });
+      }
+      if (target === 'icon') {
+        setForm((current) => ({ ...current, iconUrl: url }));
+        setIconName(file.name);
+      } else {
+        setShots((current) => current.length >= 8 ? current : [...current, url]);
+      }
+      setMsg(target === 'icon' ? 'Icon ready. Save the listing to keep it.' : 'Screenshot ready. Save the listing to keep it.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Image upload failed. Please try again.');
+    } finally {
+      setImageUpload(null);
+    }
+  };
+
+  const inspectSelectedApk = (file: File) => {
+    inspectAbortRef.current?.abort();
+    const controller = new AbortController();
+    inspectAbortRef.current = controller;
+    setApk((current) => current?.file === file ? { ...current, inspection: 'checking', inspectError: undefined } : current);
+    void inspectApk(file, controller.signal)
+      .then(({ manifest, sha256 }) => {
+        if (controller.signal.aborted || selectedApkRef.current !== file) return;
+        setApk((current) => current?.file === file ? { ...current, manifest, sha256, inspection: 'ready', inspectError: undefined } : current);
+        if (manifest.packageName && manifest.packageName !== app.packageName) {
+          setError(`This APK is for ${manifest.packageName}, but this listing is ${app.packageName}. Choose the correct APK.`);
+          return;
+        }
+        setVer((current) => ({
+          ...current,
+          versionName: current.versionName || manifest.versionName || '',
+          versionCode: current.versionCode || (manifest.versionCode ? String(manifest.versionCode) : ''),
+        }));
+        if (manifest.versionName || manifest.versionCode) setMsg('APK details were read automatically. Review them, then create the release.');
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted || selectedApkRef.current !== file) return;
+        const detail = reason instanceof Error ? reason.message : 'APK inspection failed.';
+        setApk((current) => current?.file === file ? { ...current, inspection: 'failed', inspectError: detail } : current);
+        setMsg('We could not read APK metadata automatically. You can still enter the version details and upload; the package is verified again during upload.');
+      });
+  };
+
+  const onApkFile = (file: File | undefined) => {
+    if (!file) return;
+    setError('');
+    setMsg('');
+    try { assertApkFile(file); } catch (reason) {
+      setApk(null);
+      setError(reason instanceof Error ? reason.message : 'Choose a valid APK file.');
+      return;
+    }
+    if (!apiMode && !isLocalDemo) {
+      setApk(null);
+      setError('APK uploads are unavailable while the Store service is offline.');
+      return;
+    }
+
+    inspectAbortRef.current?.abort();
+    selectedApkRef.current = file;
+    const deferInspection = file.size > 25 * 1024 * 1024;
+    setApk({ name: file.name, size: file.size, file, inspection: isLocalDemo ? 'skipped' : deferInspection ? 'skipped' : 'checking' });
+    if (isLocalDemo) {
+      setMsg('Preview only: this APK will not be uploaded or stored. Enter version details and create a local demo release.');
+      return;
+    }
+    if (deferInspection) {
+      setMsg('Large APK selected. Enter its version details and upload when ready; metadata checking is optional and will not block the upload.');
+      return;
+    }
+    setMsg('Checking APK package and version in the background… You can fill the release notes while this runs.');
+    inspectSelectedApk(file);
+  };
+
+  const retryInspection = () => {
+    if (!apk || isLocalDemo) return;
+    setError('');
+    setMsg('Checking APK metadata in the background…');
+    inspectSelectedApk(apk.file);
+  };
+
+  return (
+    <main>
+      <button onClick={() => navigate('/')} className="mb-4 flex items-center gap-1.5 text-sm text-neutral-400 transition hover:text-white"><ArrowLeft size={15} /> All apps</button>
+      <div className="mb-5 flex flex-wrap items-center gap-4">
+        <AppIcon app={app} size={56} rounded="rounded-xl" />
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-xl font-semibold text-white">{app.name}</h1>
+          <p className="truncate text-[13px] text-neutral-500">{app.packageName} · {categoryName(app.category)}{live ? ` · v${live.versionName} live` : ''}</p>
+        </div>
+        <StatusBadge status={app.status} />
+        {app.status === 'published' && <button onClick={() => { void setAppStatus(app.id, 'unlisted').catch((err: Error) => setError(err.message)); }} className={btnGhost}>Unpublish</button>}
+        {app.status === 'unlisted' && <button onClick={() => { void setAppStatus(app.id, 'published').catch((err: Error) => setError(err.message)); }} className={btnPrimary}>Publish again</button>}
+      </div>
+
+      {rejected?.note && app.status === 'draft' && (
+        <p className="mb-5 rounded-xl border border-red-400/25 bg-red-500/[0.08] px-4 py-3 text-sm text-red-200"><b>Reviewer note:</b> {rejected.note}</p>
+      )}
+      <PublishingChecklist app={{ ...app, ...form, screenshots: shots }} releases={releases} navigate={navigate} />
+      {msg && <p className="mb-5 flex gap-2 rounded-xl border border-emerald-400/25 bg-emerald-500/[0.08] px-4 py-3 text-sm text-emerald-200"><CheckCircle2 size={18} className="shrink-0" /> {msg}</p>}
+      {error && <p className="mb-5 rounded-xl border border-red-400/25 bg-red-500/[0.08] px-4 py-3 text-sm text-red-200"><b>Error:</b> {error}</p>}
+
+      <Tabs
+        className="mb-6"
+        value={tab}
+        onChange={(t) => navigate(t === 'listing' ? `/apps/${app.id}` : `/apps/${app.id}/${t}`)}
+        tabs={[
+          { id: 'listing', label: 'Store listing' },
+          { id: 'releases', label: 'Releases', count: appReleases.length },
+          { id: 'reviews', label: 'Reviews', count: appReviews.length },
+        ]}
+      />
+
+      {tab === 'listing' && (
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          if (listingSaving) return;
+          const submitter = event.nativeEvent.submitter as HTMLButtonElement | null;
+          const continueToRelease = submitter?.value === 'continue';
+          if (continueToRelease && !(form.name.trim() && form.shortDesc.trim() && form.fullDesc.trim() && form.iconUrl && shots.length >= 2 && form.supportEmail.trim())) {
+            setError('Complete the description, icon, at least 2 screenshots, and support email before continuing to APK upload.');
+            return;
+          }
+          setError('');
+          setListingSaving(true);
+          void updateApp(app.id, {
+            name: form.name.trim(), category: form.category, shortDesc: form.shortDesc.trim(), fullDesc: form.fullDesc.trim(),
+            iconUrl: form.iconUrl, supportEmail: form.supportEmail.trim(), privacyPolicyUrl: form.privacyPolicyUrl?.trim() || '',
+            screenshots: shots,
+          }).then(() => {
+            setMsg(continueToRelease ? 'Listing saved. Opening APK upload…' : 'Store listing saved. APKs always require review.');
+            if (continueToRelease) window.setTimeout(() => navigate(`/apps/${app.id}/releases`), 350);
+          }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Store listing could not be saved.')).finally(() => setListingSaving(false));
+        }}>
+          <div className="space-y-5">
+            <Card title="App details" desc={`How your app appears on ${APP_NAME}.`}>
+              <div className="space-y-5">
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div><label className={labelCls}>App name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} required /></div>
+                  <div><label className={labelCls}>Category</label><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={inputCls}>{categories.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}</select></div>
+                </div>
+                <div>
+                  <label className={labelCls}>Short description</label>
+                  <input maxLength={80} value={form.shortDesc} onChange={(e) => setForm({ ...form, shortDesc: e.target.value })} className={inputCls} placeholder="One line that explains what your app does" />
+                  <p className="mt-1 text-right text-[11px] text-neutral-600">{form.shortDesc.length} / 80</p>
+                </div>
+                <div><label className={labelCls}>Full description</label><textarea rows={7} value={form.fullDesc} onChange={(e) => setForm({ ...form, fullDesc: e.target.value })} className={inputCls} placeholder="Describe your app, its key features, and who it is for." /></div>
+              </div>
+            </Card>
+
+            <Card title="Graphics" desc="PNG, JPG, and WebP are converted to reliable, size-limited WebP files before they are stored in the Store Edge CDN.">
+              <div className="space-y-5">
+                <div>
+                  <label className={labelCls}>App icon <span className="text-red-300">*</span> · 512 × 512</label>
+                  <div className="flex flex-wrap items-center gap-4">
+                    {form.iconUrl ? <img src={form.iconUrl} alt="Current app icon" className="h-16 w-16 rounded-2xl object-cover ring-1 ring-white/10" /> : <span className="grid h-16 w-16 place-items-center rounded-2xl bg-[#333] font-display text-xl font-semibold text-white">{form.name.charAt(0)}</span>}
+                    <label onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void onImage(event.dataTransfer.files?.[0], 'icon'); }} className={`${btnGhost} ${imageUpload ? 'pointer-events-none opacity-50' : 'cursor-pointer'}`}>
+                      {imageUpload?.target === 'icon' ? <LoaderCircle size={16} className="animate-spin" /> : <ImagePlus size={16} />}
+                      {imageUpload?.target === 'icon' ? `${imageUpload.phase} ${imageUpload.phase === 'Uploading image…' ? `${imageUpload.progress}%` : ''}` : iconName || 'Upload icon'}
+                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!imageUpload} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void onImage(file, 'icon'); }} />
+                    </label>
+                    <span className="text-xs text-neutral-500">Drop or choose · max 20 MB source</span>
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Screenshots <span className="text-red-300">*</span> · at least 2 required</label>
+                  <div className="flex flex-wrap gap-3">
+                    {shots.map((shot, index) => (
+                      <span key={shot} className="group relative">
+                        <img src={shot} alt={`Screenshot ${index + 1}`} className="h-40 w-[90px] rounded-lg object-cover ring-1 ring-white/10" />
+                        <button type="button" onClick={() => setShots((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-white opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100" aria-label={`Remove screenshot ${index + 1}`}><X size={13} /></button>
+                      </span>
+                    ))}
+                    <label onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void onImage(event.dataTransfer.files?.[0], 'shot'); }} className={`grid h-40 w-[90px] place-items-center rounded-lg border border-dashed border-white/20 text-neutral-400 transition hover:border-emerald-500/50 hover:text-emerald-300 ${imageUpload || shots.length >= 8 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}`}>
+                      <span className="flex flex-col items-center gap-1.5 px-1 text-center text-xs font-medium">{imageUpload?.target === 'shot' ? <><LoaderCircle size={19} className="animate-spin" /><span>{imageUpload.phase === 'Uploading image…' ? `${imageUpload.progress}%` : 'Preparing…'}</span></> : <><ImagePlus size={19} /><span>{shots.length >= 8 ? 'Maximum 8' : 'Add'}</span></>}</span>
+                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!imageUpload || shots.length >= 8} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void onImage(file, 'shot'); }} />
+                    </label>
+                  </div>
+                  <p className={hintCls}>{shots.length}/8 screenshots added. Portrait screenshots look best in the Store.</p>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="Contact & privacy">
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div><label className={labelCls}>Support email</label><input type="email" value={form.supportEmail} onChange={(e) => setForm({ ...form, supportEmail: e.target.value })} className={inputCls} /></div>
+                <div><label className={labelCls}>Privacy policy URL</label><input value={form.privacyPolicyUrl ?? ''} onChange={(e) => setForm({ ...form, privacyPolicyUrl: e.target.value })} className={inputCls} placeholder="https://example.com/privacy" /><p className={hintCls}>Required if your app collects personal data.</p></div>
+              </div>
+            </Card>
+
+            <div className="sticky bottom-4 z-20 flex flex-col gap-2.5 rounded-xl border border-white/[0.08] bg-[#2a2a2a]/95 px-4 py-3 shadow-xl shadow-black/40 backdrop-blur sm:flex-row sm:justify-end">
+              <button type="button" disabled={listingSaving || !!imageUpload} onClick={() => { setForm(app); setShots(app.screenshots); setIconName(''); }} className={`${btnGhost} sm:order-1`}>Discard changes</button>
+              <button type="submit" value="save" disabled={listingSaving || !!imageUpload} className={`${btnGhost} sm:order-2`}>{listingSaving ? <><LoaderCircle size={15} className="animate-spin" /> Saving…</> : 'Save listing'}</button>
+              <button type="submit" value="continue" disabled={listingSaving || !!imageUpload} className={`${btnPrimary} sm:order-3`}>{listingSaving ? <><LoaderCircle size={15} className="animate-spin" /> Saving…</> : <>Save & continue to APK <ChevronRight size={15} /></>}</button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {tab === 'releases' && (
+        <div className="space-y-5">
+          <Card title="Upload a new release" desc="Every supported APK is uploaded to GitHub storefiles through the Store Worker (up to 50 MB), with live byte-by-byte progress.">
+            <form className="space-y-5" onSubmit={(event) => {
+              event.preventDefault();
+              if (!apk || !canCreateRelease) return;
+              setError('');
+              setMsg('');
+              setReleaseBusy(true);
+              void (async () => {
+                try {
+                  let uploaded: UploadedApk | undefined;
+                  if (apiMode) {
+                    if (apkPackageMismatch) throw new Error(`This APK is for ${apk.manifest?.packageName}, not ${app.packageName}.`);
+                    setUploadPct(0);
+                    uploaded = await uploadApk(apk.file, app, Number(ver.versionCode), { onProgress: (fraction) => setUploadPct(Math.round(fraction * 100)) });
+                  }
+                  const rel = await addRelease(app.id, {
+                    versionName: ver.versionName.trim(), versionCode: Number(ver.versionCode), sizeBytes: apk.size,
+                    changelog: ver.changelog.trim(), permissions: apk.manifest?.permissions?.length ? apk.manifest.permissions : ['android.permission.INTERNET'],
+                    apkName: apk.name, apkUrl: uploaded?.url, apkProvider: uploaded?.provider, apkKey: uploaded?.key,
+                    apkSha256: uploaded?.sha256 ?? apk.sha256, manifest: uploaded?.manifest ?? apk.manifest ?? undefined,
+                  });
+                  setMsg(isLocalDemo
+                    ? `Preview release v${rel.versionName} created locally (${formatBytes(apk.size)}). No APK was uploaded; submit the demo release for review below.`
+                    : `Release v${rel.versionName} created and stored in GitHub · storefiles. Submit it for review below.`);
+                  selectedApkRef.current = null;
+                  setApk(null);
+                  setVer({ versionName: '', versionCode: '', changelog: '' });
+                } catch (reason) {
+                  setError(reason instanceof Error ? reason.message : 'Release creation failed. Please try again.');
+                } finally {
+                  setUploadPct(null);
+                  setReleaseBusy(false);
+                }
+              })();
+            }}>
+              <label onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onApkFile(event.dataTransfer.files?.[0]); }} className={`flex flex-col items-center gap-2 rounded-xl border border-dashed border-white/20 bg-[#242424] px-4 py-9 text-center transition hover:border-emerald-500/50 ${releaseBusy ? 'pointer-events-none opacity-60' : 'cursor-pointer'}`}>
+                {releaseBusy ? <LoaderCircle size={30} className="animate-spin text-emerald-400" /> : <UploadCloud size={30} className="text-emerald-400" />}
+                <span className="text-sm font-medium text-white">{apk ? `${apk.name} · ${formatBytes(apk.size)}` : 'Choose an APK file or drop it here'}</span>
+                <span className="max-w-xl text-xs leading-relaxed text-neutral-500">{apk ? `GitHub storefiles · secure Worker upload · up to ${formatBytes(APK_GITHUB_LIMIT_BYTES)}` : 'Use a signed release APK. Android App Bundles (.aab) are not supported yet.'}</span>
+                <input type="file" accept=".apk,application/vnd.android.package-archive" className="hidden" disabled={releaseBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; onApkFile(file); }} />
+              </label>
+
+              {apk && (
+                <div className={`rounded-lg border px-3.5 py-3 text-xs leading-relaxed ${apkPackageMismatch ? 'border-red-400/25 bg-red-500/[0.08] text-red-200' : 'border-white/[0.08] bg-white/[0.035] text-neutral-400'}`}>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <span className="font-medium text-neutral-200">Preflight:</span>
+                    {apk.inspection === 'checking' && <span className="inline-flex items-center gap-1.5 text-sky-200"><LoaderCircle size={13} className="animate-spin" /> Reading package and version in background…</span>}
+                    {apk.inspection === 'ready' && <span className="inline-flex items-center gap-1.5 text-emerald-300"><CheckCircle2 size={13} /> APK metadata checked</span>}
+                    {apk.inspection === 'skipped' && <span>Skipped for this large APK so the direct upload can start promptly.</span>}
+                    {apk.inspection === 'failed' && <span>Automatic check did not finish. The APK will be checked again during upload where possible.</span>}
+                    {(apk.inspection === 'skipped' || apk.inspection === 'failed') && !releaseBusy && <button type="button" onClick={retryInspection} className="inline-flex items-center gap-1 text-emerald-300 hover:text-emerald-200"><RotateCcw size={12} /> Check now</button>}
+                  </div>
+                  {apk.inspectError && <p className="mt-1.5 text-neutral-500">{apk.inspectError}</p>}
+                  {apk.manifest && <p className="mt-1.5">Package <span className="font-medium text-neutral-200">{apk.manifest.packageName ?? 'not found'}</span>{apk.manifest.minSdk ? <> · min SDK {apk.manifest.minSdk}</> : null}{apk.manifest.targetSdk ? <> · target SDK {apk.manifest.targetSdk}</> : null}{apk.manifest.permissions.length ? <> · {apk.manifest.permissions.length} permissions</> : null}</p>}
+                </div>
+              )}
+
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div><label className={labelCls}>Version name</label><input required disabled={releaseBusy} value={ver.versionName} onChange={(event) => setVer({ ...ver, versionName: event.target.value })} className={inputCls} placeholder="1.0.0" /></div>
+                <div><label className={labelCls}>Version code</label><input required disabled={releaseBusy} type="number" min={1} step={1} value={ver.versionCode} onChange={(event) => setVer({ ...ver, versionCode: event.target.value })} className={inputCls} placeholder="1" /><p className={hintCls}>A positive integer that increases with every release.</p></div>
+              </div>
+              <div><label className={labelCls}>Release notes</label><textarea disabled={releaseBusy} rows={3} value={ver.changelog} onChange={(event) => setVer({ ...ver, changelog: event.target.value })} className={inputCls} placeholder="What is new in this version?" /></div>
+              <div className="border-t border-white/[0.06] pt-4">
+                {releaseBusy && <div className="mb-3">
+                  <div className="flex justify-between text-xs text-neutral-400"><span>{uploadPct === null ? 'Finalizing release…' : uploadPct >= 100 ? 'Upload received — validating and saving release…' : 'Uploading APK securely…'}</span><span>{uploadPct ?? 100}%</span></div>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10"><span className="block h-full rounded-full bg-emerald-500 transition-[width]" style={{ width: `${uploadPct ?? 100}%` }} /></div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">Keep this tab open until the release is created. If the connection drops, selecting the same APK and trying again is safe.</p>
+                </div>}
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  {!apk && <span className="mr-auto text-xs text-neutral-500">Choose an APK to begin.</span>}
+                  {apkPackageMismatch && <span className="mr-auto text-xs text-red-300">This package does not match the listing.</span>}
+                  <button disabled={!canCreateRelease} className={btnPrimary}>{releaseBusy ? <><LoaderCircle size={16} className="animate-spin" /> Creating release…</> : <><FileUp size={16} /> Upload & create release</>}</button>
+                </div>
+              </div>
+            </form>
+          </Card>
+
+          <Card title="Release history" desc={live ? `Currently live: v${live.versionName} (${live.versionCode})` : 'Nothing is live yet. Your first approved release will appear here.'}>
+            {appReleases.length ? (
+              <>
+                <div className="-mx-5 -my-2 divide-y divide-white/[0.06] md:hidden">
+                  {appReleases.map((release) => (
+                    <div key={release.id} className="px-5 py-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <b className="text-sm text-white">v{release.versionName}</b>
+                        <span className="text-xs text-neutral-500">({release.versionCode})</span>
+                        {release.isLive && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-300 ring-1 ring-emerald-400/25">Live</span>}
+                        <span className={`ml-auto text-xs font-semibold ${release.reviewStatus === 'approved' ? 'text-emerald-300' : release.reviewStatus === 'rejected' ? 'text-red-300' : 'text-amber-300'}`}>
+                          {release.reviewStatus === 'approved' ? 'Approved' : release.reviewStatus === 'rejected' ? 'Rejected' : 'Pending'}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-neutral-500">
+                        <span>{formatBytes(release.apkSizeBytes)}</span><span aria-hidden="true">·</span>
+                        <span>GitHub</span><span aria-hidden="true">·</span>
+                        <span>{formatCount(release.downloads)} downloads</span>
+                      </p>
+                      {release.reviewStatus === 'rejected' && release.reviewNote && <p className="mt-1.5 text-xs text-neutral-400">“{release.reviewNote}”</p>}
+                      {release.reviewStatus === 'pending' && app.status !== 'in_review' && (
+                        <button onClick={() => { setError(''); void submitForReview(app.id, release.id).then(() => setMsg('Submitted for review. Once an admin approves it, this version will go live.')).catch((reason: Error) => setError(reason.message)); }}
+                          className="mt-3 rounded-lg bg-amber-500 px-3.5 py-2 text-xs font-semibold text-black transition hover:bg-amber-400">Submit for review</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="-mx-5 -my-2 hidden overflow-x-auto md:block">
+                  <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+                    <thead><tr className="border-b border-white/[0.07] text-xs uppercase tracking-wide text-neutral-500">
+                      <th className="px-5 py-2.5 font-semibold">Version</th><th className="px-3 py-2.5 font-semibold">Size</th><th className="px-3 py-2.5 font-semibold">Storage</th>
+                      <th className="px-3 py-2.5 font-semibold">Review</th><th className="px-3 py-2.5 text-right font-semibold">Downloads</th><th className="px-3 py-2.5 text-right font-semibold">Action</th>
+                    </tr></thead>
+                    <tbody>{appReleases.map((release) => (
+                      <tr key={release.id} className="border-b border-white/[0.05] last:border-0">
+                        <td className="px-5 py-3"><span className="font-medium text-white">v{release.versionName}</span> <span className="text-xs text-neutral-500">({release.versionCode})</span>{release.isLive && <span className="ml-2 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-300 ring-1 ring-emerald-400/25">Live</span>}</td>
+                        <td className="px-3 py-3 text-neutral-400">{formatBytes(release.apkSizeBytes)}</td>
+                        <td className="px-3 py-3 text-neutral-400">GitHub</td>
+                        <td className="px-3 py-3"><span className={release.reviewStatus === 'approved' ? 'text-emerald-300' : release.reviewStatus === 'rejected' ? 'text-red-300' : 'text-amber-300'}>{release.reviewStatus === 'approved' ? 'Approved' : release.reviewStatus === 'rejected' ? 'Rejected' : 'Pending'}</span>{release.reviewStatus === 'rejected' && release.reviewNote ? <span className="block max-w-[220px] truncate text-xs text-neutral-500" title={release.reviewNote}>{release.reviewNote}</span> : null}</td>
+                        <td className="px-3 py-3 text-right text-neutral-300">{formatCount(release.downloads)}</td>
+                        <td className="px-3 py-3 text-right">
+                          {release.reviewStatus === 'pending' && app.status !== 'in_review'
+                            ? <button onClick={() => { setError(''); void submitForReview(app.id, release.id).then(() => setMsg('Submitted for review. Once an admin approves it, this version will go live.')).catch((reason: Error) => setError(reason.message)); }} className="rounded-lg bg-amber-500 px-3.5 py-1.5 text-xs font-semibold text-black transition hover:bg-amber-400">Submit for review</button>
+                            : <span className="text-xs text-neutral-600">—</span>}
+                        </td>
+                      </tr>))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : <EmptyState icon={UploadCloud} title="No releases yet" desc="Upload your first signed APK above. Every release is reviewed by an administrator before it goes live." />}
+          </Card>
+        </div>
+      )}
+
+      {tab === 'reviews' && (
+        <div className="space-y-4">
+          {appReviews.map((r) => (
+            <section key={r.id} className="rounded-xl border border-white/[0.08] bg-[#2a2a2a] px-5 py-4">
+              <div className="flex items-center gap-2.5">
+                <Avatar name={r.username} size={32} />
+                <b className="text-sm text-white">@{r.username}</b>
+                <Stars value={r.rating} size={12} />
+                <span className="ml-auto text-xs text-neutral-600">{new Date(r.createdAt).toLocaleDateString('en-US')}</span>
+              </div>
+              <p className="mt-2.5 text-sm leading-relaxed text-neutral-300">{r.body}</p>
+              {r.developerReply
+                ? <p className="mt-3 rounded-lg bg-[#242424] px-3.5 py-2.5 text-[13px] text-neutral-300"><b className="text-emerald-300">Your reply: </b>{r.developerReply}</p>
+                : <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); setError(''); void replyReview(r.id, replyDraft[r.id] ?? '').then(() => setReplyDraft((current) => ({ ...current, [r.id]: '' }))).catch((reason: Error) => setError(reason.message)); }}>
+                    <input value={replyDraft[r.id] ?? ''} onChange={(e) => setReplyDraft({ ...replyDraft, [r.id]: e.target.value })} placeholder="Reply as the developer…" className={inputCls} />
+                    <button className={`${btnPrimary} shrink-0`}>Reply</button>
+                  </form>}
+            </section>
+          ))}
+          {!appReviews.length && <Card><p className="py-6 text-center text-sm text-neutral-500">No reviews yet for this app.</p></Card>}
+        </div>
+      )}
+    </main>
+  );
+}
