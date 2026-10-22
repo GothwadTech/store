@@ -30,7 +30,7 @@ body {
   font-family: var(--font-display);
 }
 
-/* ── Focus: keyboard users ko hamesha dikhe, mouse par nahi ─────────── */
+/* ── Focus: always visible for keyboard users, hidden for pointer clicks ─────────── */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid rgb(52 211 153 / 0.9);
   outline-offset: 2px;

@@ -1,23 +1,23 @@
 # Kiwi Store — Cloudflare D1 SQLite Migrations (`sql/`)
 
-Is folder me **Kiwi Store** ke **Cloudflare D1 (`store`, `a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`)** ke idempotent SQLite migrations aur official Gothwad ecosystem seeds hain.
+This directory contains the idempotent SQLite migrations and official Gothwad ecosystem seeds for the **Kiwi Store** **Cloudflare D1** database (`store`, `a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`).
 
 ## Files
 
-| File | Kaam |
+| File | Purpose |
 |---|---|
-| `00_d1_console_bootstrap.sql` | **Cloudflare Dashboard D1 Console** me seedha copy-paste karne ke liye 100% pure idempotent SQL (zero `--` comments, zero `PRAGMA`). |
-| `01_store_schema.sql` | Wrangler CLI (`npx wrangler d1 execute store --remote --file=sql/01_store_schema.sql`) ke liye documented schema + category + ecosystem seeds. |
+| `00_d1_console_bootstrap.sql` | Pure idempotent SQL (zero `--` comments, zero `PRAGMA` statements) designed for direct copy-paste execution in the **Cloudflare Dashboard D1 Console**. |
+| `01_store_schema.sql` | Documented schema, category seeds, and official ecosystem app seeds for Wrangler CLI (`npx wrangler d1 execute store --remote --file=sql/01_store_schema.sql`). |
 
 ## Cold-Start Auto-Bootstrap
 
-Worker (`worker/src/db.ts` -> `ensureSchema(env.DB)`) pehli request aane par automatically saari 13 tables, indexes, 12 categories aur 5 official Gothwad ecosystem apps (`CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE`) bootstrap kar deta hai.
+The Worker (`worker/src/db.ts` -> `ensureSchema(env.DB)`) automatically bootstraps all 13 tables, indexes, 12 categories, and 5 official Gothwad ecosystem apps (`CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE`) on its first request.
 
-Fir bhi manual bootstrap ya verification ke liye:
+For manual bootstrap or verification:
 
 ### Option A — Cloudflare Dashboard D1 Console
-1. Cloudflare Dashboard → **Workers & Pages** → **D1 SQL database** → **`store`** (`a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`) kholo.
-2. **Console** tab me `sql/00_d1_console_bootstrap.sql` poora paste karke **Execute** daba do.
+1. Open Cloudflare Dashboard → **Workers & Pages** → **D1 SQL database** → **`store`** (`a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`).
+2. In the **Console** tab, paste the entire contents of `sql/00_d1_console_bootstrap.sql` and click **Execute**.
 
 ### Option B — Wrangler CLI
 ```bash
@@ -26,6 +26,6 @@ npx wrangler d1 execute store --remote --file=../sql/01_store_schema.sql
 ```
 
 ## Important Rules
-- D1 SQL files ya runtime queries me kabhi `PRAGMA` mat daalo (Cloudflare D1 remote batch `SQLITE_AUTH` deta hai).
-- `00_d1_console_bootstrap.sql` me koi `--` ya `/* */` comment nahi hona chahiye.
-- Har migration idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `INSERT OR IGNORE`) hona chahiye.
+- Never place `PRAGMA` statements in D1 SQL files or runtime queries (Cloudflare D1 remote batch execution rejects `PRAGMA` with `SQLITE_AUTH`).
+- Keep `00_d1_console_bootstrap.sql` completely free of `--` or `/* */` comments.
+- Keep every migration idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `INSERT OR IGNORE`).

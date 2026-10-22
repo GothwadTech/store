@@ -9,7 +9,7 @@ import { moduleUrl } from './helpers/ts.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (path) => readFileSync(join(root, path), 'utf8');
 
-// manifest.json build me generate hota hai (shared/brand.ts + env) - static file nahi.
+// manifest.json is generated at build time from shared/brand.ts + env rather than checked in statically.
 const { manifestFor, resolveBrand } = await import(await moduleUrl('shared/brand.ts'));
 const defaultManifest = manifestFor(resolveBrand({}));
 

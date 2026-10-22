@@ -1,4 +1,4 @@
-// Kiwi Store - shared types (Web Store + Console + Admin + Android API ek hi shape)
+// Kiwi Store - shared types across Web Store, Console, Admin, and Android API
 export type AppStatus = 'draft' | 'in_review' | 'published' | 'unlisted' | 'suspended';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 export type StorageProvider = 'github' | 'd1';
@@ -21,13 +21,14 @@ export interface AppRelease {
   appId: string;
   versionCode: number;
   versionName: string;
-  /** APK hamesha GothwadTech/storefiles GitHub Releases par hota hai. */
-  apkProvider: Extract<StorageProvider, 'github'>;
+  /** APK binary is hosted on GitHub Releases (GothwadTech/storefiles) or F-Droid. */
+  apkProvider: 'github' | 'fdroid';
   apkKey: string;
   apkUrl: string;
   apkSizeBytes: number;
   apkSha256?: string;
   minSdk?: number;
+  targetSdk?: number;
   permissions: string[];
   changelog: string;
   reviewStatus: ReviewStatus;
@@ -49,7 +50,7 @@ export interface StoreApp {
   status: AppStatus;
   shortDesc: string;
   fullDesc: string;
-  /** Images Cloudflare D1 `store_images` + Edge Cache (`/api/images/:id`) par */
+  /** Images Cloudflare D1 `store_images` + Edge Cache (`/api/images/:id`) ya F-Droid par */
   iconUrl: string;
   iconColor: string;
   featureGraphicUrl?: string;
@@ -58,6 +59,9 @@ export interface StoreApp {
   supportEmail: string;
   website?: string;
   privacyPolicyUrl?: string;
+  license?: string;
+  sourceCodeUrl?: string;
+  source?: string;
   ratingAvg: number;
   ratingCount: number;
   downloadsCount: number;

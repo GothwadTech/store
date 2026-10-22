@@ -1,19 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════
-// KIWI STORE — app name + domains ka EK HI source of truth.
+// KIWI STORE — Single source of truth for brand names and domains.
 //
-// Niyam: kisi bhi component / worker / html me domain ya brand name
-// hardcode NAHI karna. Sab kuch yahan se aata hai aur env se override hota hai:
+// Rule: never hardcode domain names or brand labels in components, Worker
+// routes, or HTML. Everything resolves from here and can be overridden via
+// environment variables:
 //   · Frontend (browser) : src/lib/config.ts   -> resolveBrand(import.meta.env)
 //   · Build (index.html, manifest.json) : vite.config.ts -> resolveBrand(process.env)
 //   · Worker (API/CORS)  : worker/src/index.ts -> resolveBrand(env, { prefix: '' })
 //
-// Domain badalna ho to code touch karne ki zaroorat NAHI:
-//   Pages  → environment variable  VITE_APP_DOMAIN (ya VITE_STORE_URL etc.)
-//   Worker → variable APP_DOMAIN / STORE_HOST etc. (dashboard ya wrangler.toml)
-// App name badalna ho to VITE_APP_NAME / APP_NAME.
-//
-// Yeh file bilkul pure hai (koi DOM / node import nahi) taaki browser, vite
-// config aur Worker teeno isko import kar sakein.
+// Pure TypeScript module (no DOM or Node imports) so browser, Vite config,
+// and Cloudflare Worker can all import it directly.
 // ═══════════════════════════════════════════════════════════════════
 
 export type SiteMode = 'store' | 'console' | 'admin' | 'storeapp';
@@ -25,7 +21,7 @@ export const SITE_MODES: { id: SiteMode; label: string }[] = [
   { id: 'storeapp', label: 'Store App' },
 ];
 
-/** Har site ka default subdomain. Poora URL = https://<host>.<appDomain>. */
+/** Default subdomain per surface. Full URL = https://<host>.<appDomain>. */
 export const DEFAULT_SITE_HOSTS: Record<SiteMode, string> = {
   store: 'kiwistore',
   console: 'kiwiconsole',
@@ -37,9 +33,9 @@ export const BRAND_DEFAULTS = {
   appName: 'Kiwi Store',
   shortName: 'Kiwi',
   appDomain: 'gothwadtech.com',
-  /** Ecosystem ka naam (Mail/Drive/Store sab isi ke under) - Accounts isi se banta hai. */
+  /** Parent ecosystem name across Mail, Drive, Store, and Accounts. */
   ecosystemName: 'Gothwad',
-  /** Store ki apni Android app ka package (APK wahi rahega jab tak rebuild na ho). */
+  /** Native Android client package name. */
   storeappPackage: 'com.gothwad.store',
   accountsApiUrl: 'https://api.gothwadtech.com',
   accountsSignInUrl: 'https://accounts.gothwadtech.com',
@@ -50,6 +46,9 @@ export const BRAND_DEFAULTS = {
 export interface Brand {
   appName: string;
   shortName: string;
+  storeName: string;
+  consoleName: string;
+  adminName: string;
   appDomain: string;
   ecosystemName: string;
   accountsName: string;
@@ -64,7 +63,7 @@ export interface Brand {
   siteUrls: Record<SiteMode, string>;
 }
 
-/** Env keys (prefix ke saath) - pehla match jeetta hai, baaki fallback hain. */
+/** Environment variable keys (with optional prefix); first non-empty match wins. */
 const ENV_KEYS = {
   appName: ['APP_NAME'],
   shortName: ['APP_SHORT_NAME'],
@@ -99,8 +98,8 @@ function pick(env: Record<string, unknown>, prefix: string, keys: readonly strin
 }
 
 /**
- * Env (browser: import.meta.env, build: process.env, Worker: env) se poora
- * brand + site map banata hai. Jo value env me nahi hai uska default yahi hai.
+ * Resolve complete brand and surface URLs from environment variables with
+ * fallback to BRAND_DEFAULTS.
  */
 export function resolveBrand(rawEnv: Record<string, unknown> = {}, opts: { prefix?: string } = {}): Brand {
   const env = rawEnv ?? {};
@@ -114,13 +113,14 @@ export function resolveBrand(rawEnv: Record<string, unknown> = {}, opts: { prefi
 
   const accountsSignInUrl = trimSlash(str(ENV_KEYS.accountsSignInUrl, BRAND_DEFAULTS.accountsSignInUrl));
   const ecosystemName = str(ENV_KEYS.ecosystemName, BRAND_DEFAULTS.ecosystemName);
+  const appName = str(ENV_KEYS.appName, BRAND_DEFAULTS.appName);
+  const shortName = str(ENV_KEYS.shortName, BRAND_DEFAULTS.shortName);
 
   const siteHosts = {} as Record<SiteMode, string>;
   const siteUrls = {} as Record<SiteMode, string>;
   for (const { id } of SITE_MODES) {
     const overrideUrl = pick(env, prefix, SITE_ENV_KEYS[id].url);
     if (overrideUrl) {
-      // Poora URL diya hai (dusra zone / custom hostname) - wahi chalega.
       siteUrls[id] = trimSlash(overrideUrl);
       siteHosts[id] = hostOf(overrideUrl) ?? `${DEFAULT_SITE_HOSTS[id]}.${appDomain}`;
       continue;
@@ -131,8 +131,11 @@ export function resolveBrand(rawEnv: Record<string, unknown> = {}, opts: { prefi
   }
 
   return {
-    appName: str(ENV_KEYS.appName, BRAND_DEFAULTS.appName),
-    shortName: str(ENV_KEYS.shortName, BRAND_DEFAULTS.shortName),
+    appName,
+    shortName,
+    storeName: appName,
+    consoleName: `${shortName} Console`,
+    adminName: `${shortName} Admin`,
     appDomain,
     ecosystemName,
     accountsName: str(ENV_KEYS.accountsName, `${ecosystemName} Accounts`),
@@ -148,19 +151,19 @@ export function resolveBrand(rawEnv: Record<string, unknown> = {}, opts: { prefi
   };
 }
 
-/** Hostname (lowercase, trailing dot hata kar) - production check ke liye. */
+/** Normalize hostname (lowercase, strip trailing dot) for production host checks. */
 export function normalizeHost(hostname: string): string {
   return hostname.toLowerCase().replace(/\.$/, '');
 }
 
-/** Yeh hostname hamare apne zone (appDomain) ka hai? Demo/preview gating isi se. */
+/** Check whether hostname belongs to the configured production zone (appDomain). */
 export function isBrandHost(hostname: string, appDomain: string): boolean {
   const host = normalizeHost(hostname);
   const domain = appDomain.toLowerCase().replace(/^\.+/, '');
   return host === domain || host.endsWith(`.${domain}`);
 }
 
-/** Hostname se site mode - configured site hosts se match hota hai (koi hardcode prefix nahi). */
+/** Resolve site surface mode from hostname using configured siteHosts/siteUrls. */
 export function modeForHost(hostname: string, brand: Brand): SiteMode | null {
   const host = normalizeHost(hostname);
   for (const { id } of SITE_MODES) {
@@ -169,7 +172,7 @@ export function modeForHost(hostname: string, brand: Brand): SiteMode | null {
   return null;
 }
 
-// ── Copy / SEO (app name se derive hota hai, hardcode nahi) ─────────
+// ── Copy / SEO (derived from configured brand name) ─────────────────
 export function seoFor(mode: SiteMode, brand: Brand): { title: string; description: string } {
   const { appName, shortName, ecosystemName } = brand;
   if (mode === 'console') {
@@ -216,7 +219,7 @@ export function manifestFor(brand: Brand) {
   };
 }
 
-/** index.html ke %TOKEN% - build (vite.config.ts) inhe brand se replace karta hai. */
+/** Replacement tokens for index.html %TOKEN% placeholders at build time (vite.config.ts). */
 export function htmlTokens(brand: Brand): Record<string, string> {
   const seo = seoFor('store', brand);
   return {

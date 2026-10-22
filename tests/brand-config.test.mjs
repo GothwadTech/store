@@ -102,7 +102,7 @@ test('hostname detection follows the configured hosts (no hardcoded prefixes)', 
   assert.equal(modeForHost('KIWISTORE.gothwadtech.com.', brand), 'store');
   assert.equal(modeForHost('kiwiapp.gothwadtech.com', brand), 'storeapp');
   assert.equal(modeForHost('anything.pages.dev', brand), null);
-  // Purane domains ab koi site nahi hain - preview/local gating isi par chalti hai.
+  // Legacy domains are not matched as production surfaces; preview/local gating relies on this.
   assert.equal(modeForHost('store.gothwadtech.com', brand), null);
 });
 

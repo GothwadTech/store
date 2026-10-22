@@ -1,25 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft, BadgeCheck, Bookmark, BookmarkCheck, Download, Flag, Gamepad2, Home,
   LayoutGrid, Library, Search, ShieldCheck, Star, Trophy, X,
 } from 'lucide-react';
 import { useApp } from '../lib/AppContext';
+import { fetchAppDetail } from '../lib/api';
 import { usePath } from '../lib/router';
 import {
   AccountMenu, AppIcon, Avatar, Button, EmptyState, Logo, Pill, SectionTitle,
-  SiteFooter, Skeleton, Stars, categoryName, cx,
+  SiteFooter, Skeleton, SourceBadge, Stars, categoryName, cx, isFdroidApp,
 } from '../shared/ui';
 import { BackendNotice } from '../shared/BackendNotice';
 import { formatBytes, formatCount } from '../lib/storage';
 import { startGothwadSignIn } from '../lib/auth';
 import { APP_NAME, ECOSYSTEM_NAME, SITE_URLS } from '../lib/config';
-import type { StoreApp as StoreAppType } from '../types';
+import type { AppRelease, Review, StoreApp as StoreAppType } from '../types';
 import { CallbackPage, HomePage, LibraryPage, ListPage, Rail, SearchPage } from './StorePages';
 
 const NAV: [string, string, typeof Home][] = [
   ['/', 'For you', Home],
   ['/apps', 'Apps', LayoutGrid],
   ['/games', 'Games', Gamepad2],
+  ['/fdroid', 'F-Droid', ShieldCheck],
   ['/charts', 'Top charts', Trophy],
   ['/library', 'Library', Library],
 ];
@@ -45,7 +47,7 @@ function Header({ navigate, path }: { navigate: (p: string) => void; path: strin
 
         <form onSubmit={submit} className="ml-auto hidden w-full max-w-md items-center gap-2 rounded-full bg-white/[0.06] px-4 py-2.5 ring-1 ring-white/[0.07] transition focus-within:bg-white/[0.08] focus-within:ring-emerald-400/50 md:flex lg:ml-6">
           <Search size={17} className="shrink-0 text-neutral-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search apps & games" aria-label="Search apps and games"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search Kiwi Store & F-Droid" aria-label="Search apps and games"
             className="w-full bg-transparent text-sm text-white outline-none placeholder:text-neutral-500" />
           {q && <button type="button" onClick={() => setQ('')} aria-label="Clear search"><X size={15} className="text-neutral-400 hover:text-white" /></button>}
         </form>
@@ -77,7 +79,7 @@ function Header({ navigate, path }: { navigate: (p: string) => void; path: strin
       <form onSubmit={submit} className="px-4 pb-3 md:hidden">
         <label className="flex items-center gap-2 rounded-full bg-white/[0.06] px-4 py-2.5 ring-1 ring-white/[0.07] focus-within:ring-emerald-400/50">
           <Search size={16} className="shrink-0 text-neutral-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search apps & games" aria-label="Search apps and games"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search Kiwi Store & F-Droid" aria-label="Search apps and games"
             className="w-full bg-transparent text-sm text-white outline-none placeholder:text-neutral-500" />
         </label>
       </form>
@@ -105,18 +107,29 @@ function BottomNav({ navigate, path }: { navigate: (p: string) => void; path: st
   );
 }
 
-function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string) => void }) {
+function DetailPage({
+  app,
+  navigate,
+  releaseOverride,
+  reviewsOverride,
+}: {
+  app: StoreAppType;
+  navigate: (p: string) => void;
+  releaseOverride?: AppRelease | null;
+  reviewsOverride?: Review[];
+}) {
   const ctx = useApp();
   const { user, reviews, wishlist, toggleWishlist, liveReleaseOf, addReview, reportApp, backendLive, demoModeAvailable, isDemoUser, recordDownload, signInDemo } = ctx;
+  const fdroid = isFdroidApp(app);
   const canPreviewDownload = demoModeAvailable && isDemoUser;
-  const rel = liveReleaseOf(app.id);
-  const appReviews = reviews.filter((r) => r.appId === app.id);
+  const rel = releaseOverride ?? liveReleaseOf(app.id);
+  const appReviews = reviewsOverride ?? reviews.filter((r) => r.appId === app.id);
   const wished = wishlist.includes(app.id);
   const [rating, setRating] = useState(5);
   const [body, setBody] = useState('');
   const [toast, setToast] = useState('');
   const similar = ctx.apps.filter((a) => a.status === 'published' && a.id !== app.id && a.category === app.category);
-  const installDisabled = !canPreviewDownload && (!backendLive || !rel?.apkUrl);
+  const installDisabled = !canPreviewDownload && ((!backendLive && !fdroid) || !rel?.apkUrl);
 
   const download = () => {
     if (canPreviewDownload) {
@@ -124,12 +137,12 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
       setToast('Preview download simulated. Sample listings do not contain a real APK.');
       return;
     }
-    if (!backendLive || !rel?.apkUrl) {
+    if ((!backendLive && !fdroid) || !rel?.apkUrl) {
       setToast('A downloadable APK is not available for this app yet.');
       return;
     }
     window.open(rel.apkUrl, '_blank', 'noopener,noreferrer');
-    setToast('Your download is starting.');
+    setToast(fdroid ? 'Downloading signed open-source APK from F-Droid…' : 'Your download is starting.');
   };
 
   const wishlistClick = () => {
@@ -144,8 +157,8 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
   };
 
   const stats: [string, string][] = [
-    [app.ratingAvg.toFixed(1), `${formatCount(app.ratingCount)} reviews`],
-    [formatCount(app.downloadsCount), 'Downloads'],
+    [app.ratingAvg.toFixed(1), fdroid ? 'FOSS rating' : `${formatCount(app.ratingCount)} reviews`],
+    [fdroid ? (app.license || 'FOSS') : formatCount(app.downloadsCount), fdroid ? 'License' : 'Downloads'],
     [rel ? formatBytes(rel.apkSizeBytes) : '—', 'Size'],
     [rel ? `v${rel.versionName}` : '—', 'Version'],
   ];
@@ -159,8 +172,11 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
         <AppIcon app={app} size={112} rounded="rounded-[28px]" />
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl">{app.name}</h1>
-          <button onClick={() => navigate(`/developer/${app.developerId}`)} className="mt-1.5 flex items-center gap-1 text-sm font-medium text-emerald-300 transition hover:text-emerald-200 hover:underline">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="font-display text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl">{app.name}</h1>
+            <SourceBadge app={app} />
+          </div>
+          <button onClick={() => navigate(fdroid ? '/fdroid' : `/developer/${app.developerId}`)} className="mt-1.5 flex items-center gap-1 text-sm font-medium text-emerald-300 transition hover:text-emerald-200 hover:underline">
             {app.developerName} {app.developerVerified && <BadgeCheck size={15} className="fill-emerald-400 text-[#212121]" />}
           </button>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] text-neutral-500">
@@ -186,7 +202,7 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
 
       <div className="mt-6 hidden flex-wrap gap-3 sm:flex">
         <Button variant="primary" size="lg" pill disabled={installDisabled} onClick={download} className="sm:px-12">
-          <Download size={19} /> {canPreviewDownload ? 'Try preview download' : rel?.apkUrl ? 'Install' : 'APK unavailable'}
+          <Download size={19} /> {canPreviewDownload ? 'Try preview download' : rel?.apkUrl ? (fdroid ? 'Download APK (F-Droid)' : 'Install') : 'APK unavailable'}
         </Button>
         <Button variant="secondary" size="lg" pill onClick={wishlistClick}>
           {wished ? <BookmarkCheck size={18} className="text-emerald-300" /> : <Bookmark size={18} />} {wished ? 'Wishlisted' : 'Wishlist'}
@@ -219,10 +235,10 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
           <ul className="mt-2.5 flex flex-wrap gap-1.5">
             {rel?.permissions.length
               ? rel.permissions.map((permission) => <li key={permission} className="rounded-lg bg-white/[0.05] px-2.5 py-1.5 font-mono text-[11px] text-neutral-300">{permission}</li>)
-              : <li className="rounded-lg bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-400">Permission information is unavailable for this release.</li>}
+              : <li className="rounded-lg bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-400">No special permissions required.</li>}
           </ul>
           {rel?.apkSha256 && <p className="mt-2.5 break-all font-mono text-[11px] text-neutral-600">SHA-256: {rel.apkSha256}</p>}
-          {user && (
+          {user && !fdroid && (
             <button onClick={() => { void reportApp(app, 'Other', '').then(() => setToast('Report submitted. Our team will review it. Thank you.')).catch((err: Error) => setToast(err.message)); }}
               className="mt-7 flex items-center gap-1.5 text-xs text-neutral-500 transition hover:text-red-300">
               <Flag size={13} /> Report this app
@@ -231,11 +247,26 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
         </div>
 
         <aside className="h-fit rounded-3xl border border-white/[0.08] bg-[#262626]/70 p-5">
-          <h3 className="font-display font-bold text-white">Developer</h3>
-          <button onClick={() => navigate(`/developer/${app.developerId}`)} className="mt-1 text-sm font-medium text-emerald-300 transition hover:underline">{app.developerName}</button>
+          <h3 className="font-display font-bold text-white">{fdroid ? 'Open-Source Info' : 'Developer'}</h3>
+          <button onClick={() => navigate(fdroid ? '/fdroid' : `/developer/${app.developerId}`)} className="mt-1 text-sm font-medium text-emerald-300 transition hover:underline">{app.developerName}</button>
           <dl className="mt-3.5 space-y-2.5 text-[13px]">
-            <div className="flex justify-between gap-3"><dt className="text-neutral-500">Support</dt><dd className="truncate text-neutral-200">{app.supportEmail}</dd></div>
-            {app.website && <div className="flex justify-between gap-3"><dt className="shrink-0 text-neutral-500">Website</dt><dd className="truncate text-neutral-200">{app.website}</dd></div>}
+            {fdroid ? (
+              <>
+                <div className="flex justify-between gap-3"><dt className="text-neutral-500">Source</dt><dd className="text-teal-300">F-Droid (f-droid.org)</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-neutral-500">License</dt><dd className="text-neutral-200">{app.license || 'FOSS'}</dd></div>
+                {(app.sourceCodeUrl || app.website) && (
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-neutral-500">Source Code</dt>
+                    <dd className="truncate"><a href={app.sourceCodeUrl || app.website} target="_blank" rel="noopener noreferrer" className="text-emerald-300 hover:underline">{app.sourceCodeUrl || app.website}</a></dd>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between gap-3"><dt className="text-neutral-500">Support</dt><dd className="truncate text-neutral-200">{app.supportEmail}</dd></div>
+                {app.website && <div className="flex justify-between gap-3"><dt className="shrink-0 text-neutral-500">Website</dt><dd className="truncate text-neutral-200">{app.website}</dd></div>}
+              </>
+            )}
             <div className="flex justify-between gap-3"><dt className="text-neutral-500">Updated</dt><dd className="text-neutral-200">{new Date(app.updatedAt).toLocaleDateString('en-IN')}</dd></div>
           </dl>
         </aside>
@@ -250,7 +281,7 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
             <p className="mt-1.5 text-xs text-neutral-500">{formatCount(app.ratingCount)} verified ratings</p>
           </div>
           <div>
-            {user ? (
+            {user && !fdroid ? (
               <form className="mb-6 rounded-2xl border border-white/[0.08] bg-[#262626]/70 p-4"
                 onSubmit={(e) => { e.preventDefault(); void addReview(app.id, rating, body).then(() => setBody('')).catch((err: Error) => setToast(err.message)); }}>
                 <p className="text-sm font-semibold text-white">Write your review, @{user.username}</p>
@@ -267,12 +298,12 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
                   <Button type="submit" variant="primary" size="sm" pill>Post review</Button>
                 </div>
               </form>
-            ) : (
+            ) : !user && !fdroid ? (
               <button onClick={() => { if (demoModeAvailable) signInDemo(); else void startGothwadSignIn(); }}
                 className="mb-6 w-full rounded-2xl border border-dashed border-white/15 px-4 py-4 text-sm text-neutral-300 transition hover:border-emerald-400/40 hover:bg-white/[0.03]">
-                {demoModeAvailable ? 'Try demo mode to write a review' : 'Sign in with Gothwad to write a review'}
+                {demoModeAvailable ? 'Try demo mode to write a review' : 'Sign in to write a review'}
               </button>
-            )}
+            ) : null}
             <div className="space-y-5">
               {appReviews.map((r) => (
                 <article key={r.id} className="border-b border-white/[0.06] pb-5 last:border-0">
@@ -283,14 +314,9 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
                     <span className="ml-auto text-[11px] text-neutral-600">{new Date(r.createdAt).toLocaleDateString('en-IN')}</span>
                   </div>
                   <p className="mt-2.5 text-sm leading-relaxed text-neutral-300">{r.body}</p>
-                  {r.developerReply && (
-                    <div className="mt-3 rounded-xl bg-white/[0.05] p-3 text-[13px] leading-relaxed text-neutral-300">
-                      <b className="text-emerald-300">{app.developerName} (developer): </b>{r.developerReply}
-                    </div>
-                  )}
                 </article>
               ))}
-              {!appReviews.length && <p className="text-sm text-neutral-500">No reviews yet. Be the first to write one.</p>}
+              {!appReviews.length && <p className="text-sm text-neutral-500">{fdroid ? 'Open-source package built and signed by F-Droid.' : 'No reviews yet. Be the first to write one.'}</p>}
             </div>
           </div>
         </div>
@@ -306,7 +332,7 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
       <div className="safe-bottom fixed inset-x-0 bottom-[68px] z-30 border-t border-white/[0.08] bg-[#1e1e1e]/95 px-4 py-3 backdrop-blur-xl sm:hidden">
         <div className="flex items-center gap-2.5">
           <Button variant="primary" size="md" pill full disabled={installDisabled} onClick={download}>
-            <Download size={18} /> {canPreviewDownload ? 'Preview download' : rel?.apkUrl ? 'Install' : 'APK unavailable'}
+            <Download size={18} /> {canPreviewDownload ? 'Preview download' : rel?.apkUrl ? (fdroid ? 'Download (F-Droid)' : 'Install') : 'APK unavailable'}
           </Button>
           <Button variant="secondary" size="md" pill onClick={wishlistClick} aria-label={wished ? 'Remove from wishlist' : 'Add to wishlist'}>
             {wished ? <BookmarkCheck size={18} className="text-emerald-300" /> : <Bookmark size={18} />}
@@ -317,20 +343,53 @@ function DetailPage({ app, navigate }: { app: StoreAppType; navigate: (p: string
   );
 }
 
+function ResolvedDetailPage({ pkg, navigate }: { pkg: string; navigate: (p: string) => void }) {
+  const { apps } = useApp();
+  const clean = pkg.replace(/^fdroid:/i, '');
+  const localApp = apps.find(
+    (a) => a.status === 'published' && (a.packageName === clean || a.id === pkg || a.id === `fdroid:${clean}`),
+  );
+  const [remote, setRemote] = useState<{ app: StoreAppType; liveRelease: AppRelease | null; reviews: Review[] } | null>(null);
+  const [loading, setLoading] = useState(!localApp);
+
+  useEffect(() => {
+    if (localApp) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    void fetchAppDetail(pkg).then((res) => {
+      if (!cancelled) {
+        if (res?.app) setRemote({ app: res.app, liveRelease: res.liveRelease, reviews: res.reviews ?? [] });
+        setLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pkg, localApp]);
+
+  if (localApp) return <DetailPage app={localApp} navigate={navigate} />;
+  if (loading) return <main className="mx-auto max-w-4xl px-4 py-16"><Skeleton className="h-48 w-full rounded-3xl" /></main>;
+  if (remote) return <DetailPage app={remote.app} releaseOverride={remote.liveRelease} reviewsOverride={remote.reviews} navigate={navigate} />;
+  return (
+    <main className="mx-auto max-w-3xl px-4 py-16">
+      <EmptyState icon={Search} title="App not found" desc="This app was not found, or it is not published yet." action={<Button variant="secondary" size="sm" onClick={() => navigate('/')}>Back to home</Button>} />
+    </main>
+  );
+}
+
 export default function StoreApp() {
   const [path, navigate] = usePath();
   const { apps } = useApp();
   const published = apps.filter((a) => a.status === 'published');
   let page: React.ReactNode;
   if (path === '/auth/callback') page = <CallbackPage navigate={navigate} />;
-  else if (path.startsWith('/app/')) {
-    const pkg = decodeURIComponent(path.slice(5));
-    const app = apps.find((a) => a.packageName === pkg && a.status === 'published');
-    page = app
-      ? <DetailPage app={app} navigate={navigate} />
-      : <main className="mx-auto max-w-3xl px-4 py-16"><EmptyState icon={Search} title="App not found" desc="This app was not found, or it is not published yet." action={<Button variant="secondary" size="sm" onClick={() => navigate('/')}>Back to home</Button>} /></main>;
-  } else if (path === '/apps') page = <HomePage navigate={navigate} kind="app" />;
+  else if (path.startsWith('/app/')) page = <ResolvedDetailPage pkg={decodeURIComponent(path.slice(5))} navigate={navigate} />;
+  else if (path === '/apps') page = <HomePage navigate={navigate} kind="app" />;
   else if (path === '/games') page = <HomePage navigate={navigate} kind="game" />;
+  else if (path === '/fdroid') page = <ListPage navigate={navigate} title="F-Droid Open Source" sub="Free and open-source Android apps & games mirrored from F-Droid (f-droid.org)" apps={published.filter(isFdroidApp)} />;
   else if (path === '/charts') page = <ListPage navigate={navigate} title="Top charts" sub={`Most popular on ${APP_NAME}`} apps={[...published].sort((a, b) => b.downloadsCount - a.downloadsCount)} />;
   else if (path.startsWith('/category/')) {
     const slug = path.slice(10);
@@ -351,7 +410,7 @@ export default function StoreApp() {
       <SiteFooter note={`The ${ECOSYSTEM_NAME} ecosystem app store`}>
         <a className="transition hover:text-neutral-200" href={SITE_URLS.console}>Developer Console</a>
         <a className="transition hover:text-neutral-200" href={SITE_URLS.storeapp}>{APP_NAME} for Android</a>
-        <span className="flex items-center gap-1.5"><Pill tone="emerald"><ShieldCheck size={11} /> Manually reviewed</Pill></span>
+        <span className="flex items-center gap-1.5"><Pill tone="emerald"><ShieldCheck size={11} /> Manually reviewed + F-Droid FOSS</Pill></span>
       </SiteFooter>
       <BottomNav navigate={navigate} path={path} />
     </div>

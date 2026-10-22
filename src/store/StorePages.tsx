@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Bookmark, ChevronRight, Gamepad2, LayoutGrid, Library, Search, UserRound } from 'lucide-react';
 import { useApp } from '../lib/AppContext';
+import { searchFdroid } from '../lib/api';
 import {
   AppCard,
   AppIcon,
@@ -12,6 +13,8 @@ import {
   SignInPrompt,
   Skeleton,
   categoryName,
+  cx,
+  isFdroidApp,
 } from '../shared/ui';
 import { handleOAuthCallback } from '../lib/auth';
 import type { StoreApp as StoreAppType } from '../types';
@@ -74,8 +77,10 @@ function HomeSkeleton() {
 export function HomePage({ navigate, kind }: { navigate: (p: string) => void; kind?: 'app' | 'game' }) {
   const { apps, categories, catalogStatus } = useApp();
   const published = apps.filter((a) => a.status === 'published' && (!kind || a.kind === kind));
+  const kiwiApps = published.filter((a) => !isFdroidApp(a));
+  const fdroidApps = published.filter((a) => isFdroidApp(a));
   const hero = published.filter((a) => a.featured === 'hero');
-  const top = [...published].sort((a, b) => b.downloadsCount - a.downloadsCount);
+  const top = [...(kiwiApps.length >= 4 ? kiwiApps : published)].sort((a, b) => b.downloadsCount - a.downloadsCount);
   const rated = [...published].sort((a, b) => b.ratingAvg - a.ratingAvg);
   const fresh = [...published].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const open = (a: StoreAppType) => navigate(`/app/${a.packageName}`);
@@ -107,7 +112,7 @@ export function HomePage({ navigate, kind }: { navigate: (p: string) => void; ki
             className="group relative overflow-hidden rounded-3xl text-left ring-1 ring-white/10 transition hover:ring-white/20 lg:col-span-3"
           >
             <img
-              src={hero[0].screenshots[0]}
+              src={hero[0].screenshots[0] || hero[0].iconUrl}
               alt=""
               className="h-60 w-full object-cover transition duration-500 group-hover:scale-[1.04] sm:h-80"
             />
@@ -150,6 +155,17 @@ export function HomePage({ navigate, kind }: { navigate: (p: string) => void; ki
         <Rail apps={published} onOpen={open} />
       </section>
 
+      {fdroidApps.length > 0 && (
+        <section className="mb-9">
+          <SectionTitle
+            title={kind === 'game' ? 'Open-source games on F-Droid' : 'Open Source on F-Droid'}
+            sub="Free, verified FOSS Android apps & games mirrored from F-Droid"
+            action={<SeeAll onClick={() => navigate('/fdroid')} />}
+          />
+          <Rail apps={fdroidApps} onOpen={open} />
+        </section>
+      )}
+
       {categories.length > 0 && (
         <section className="mb-9">
           <SectionTitle title="Categories" sub="Browse by what you need" />
@@ -185,13 +201,48 @@ export function ListPage({
   apps: StoreAppType[];
   sub?: string;
 }) {
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'kiwi' | 'fdroid'>('all');
+  const hasKiwi = apps.some((a) => !isFdroidApp(a));
+  const hasFdroid = apps.some((a) => isFdroidApp(a));
+  const visible = apps.filter((a) => {
+    if (sourceFilter === 'kiwi') return !isFdroidApp(a);
+    if (sourceFilter === 'fdroid') return isFdroidApp(a);
+    return true;
+  });
+
   return (
     <main className="mx-auto max-w-5xl px-4 pb-28 pt-6 sm:px-6">
-      <h1 className="font-display text-2xl font-bold tracking-tight text-white sm:text-3xl">{title}</h1>
-      {sub && <p className="mt-1.5 text-sm text-neutral-400">{sub}</p>}
-      {apps.length ? (
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-white sm:text-3xl">{title}</h1>
+          {sub && <p className="mt-1.5 text-sm text-neutral-400">{sub}</p>}
+        </div>
+        {hasKiwi && hasFdroid && (
+          <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] p-1">
+            {([
+              ['all', 'All sources'],
+              ['kiwi', 'Kiwi Store'],
+              ['fdroid', 'F-Droid FOSS'],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setSourceFilter(id)}
+                className={cx(
+                  'rounded-full px-3 py-1 text-xs font-semibold transition',
+                  sourceFilter === id
+                    ? 'bg-emerald-500 text-[#08130e]'
+                    : 'text-neutral-300 hover:text-white',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {visible.length ? (
         <div className="mt-5 grid gap-1 sm:grid-cols-2">
-          {apps.map((a, i) => (
+          {visible.map((a, i) => (
             <AppRow key={a.id} app={a} rank={i + 1} onOpen={(x) => navigate(`/app/${x.packageName}`)} />
           ))}
         </div>
@@ -213,22 +264,51 @@ export function ListPage({
 
 export function SearchPage({ navigate, query }: { navigate: (p: string) => void; query: string }) {
   const { apps } = useApp();
-  const q = query.toLowerCase();
-  const results = apps.filter(
+  const [liveFdroid, setLiveFdroid] = useState<StoreAppType[]>([]);
+  const [searchingFdroid, setSearchingFdroid] = useState(false);
+  const q = query.trim().toLowerCase();
+
+  useEffect(() => {
+    if (q.length < 2) {
+      setLiveFdroid([]);
+      setSearchingFdroid(false);
+      return;
+    }
+    let cancelled = false;
+    setSearchingFdroid(true);
+    const timer = window.setTimeout(() => {
+      void searchFdroid(q).then((res) => {
+        if (!cancelled) {
+          setLiveFdroid(res.apps);
+          setSearchingFdroid(false);
+        }
+      });
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [q]);
+
+  const localResults = apps.filter(
     (a) =>
       a.status === 'published' &&
       (!q ||
         a.name.toLowerCase().includes(q) ||
+        a.packageName.toLowerCase().includes(q) ||
         a.developerName.toLowerCase().includes(q) ||
         categoryName(a.category).toLowerCase().includes(q) ||
-        a.tags.some((t) => t.includes(q))),
+        a.tags.some((t) => t.toLowerCase().includes(q))),
   );
+  const seenPkgs = new Set(localResults.map((a) => a.packageName.toLowerCase()));
+  const merged = [...localResults, ...liveFdroid.filter((a) => !seenPkgs.has(a.packageName.toLowerCase()))];
+
   return (
     <ListPage
       navigate={navigate}
-      title={q ? `Results for "${query}"` : 'Search'}
-      sub={`${results.length} ${results.length === 1 ? 'app' : 'apps'} found`}
-      apps={results}
+      title={q ? `Results for "${query}"` : 'Search Kiwi Store & F-Droid'}
+      sub={`${merged.length} ${merged.length === 1 ? 'app' : 'apps'} found${searchingFdroid ? ' · Searching F-Droid repository…' : ''}`}
+      apps={merged}
     />
   );
 }

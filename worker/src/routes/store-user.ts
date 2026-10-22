@@ -43,9 +43,10 @@ export async function handleStoreAppAction(
   if (!hasD1(env)) return err('d1_not_configured', 'The Store database is not configured yet', 503);
   await ensureSchema(env.DB, env);
 
-  const app = await findApp(env.DB, appIdOrPkg);
-  if (!app) return err('not_found', 'App not found', 404);
-  const appId = str(app.id);
+  const isFdroid = appIdOrPkg.toLowerCase().startsWith('fdroid:');
+  const app = isFdroid ? null : await findApp(env.DB, appIdOrPkg);
+  if (!app && !isFdroid) return err('not_found', 'App not found', 404);
+  const appId = app ? str(app.id) : appIdOrPkg;
   const method = req.method.toUpperCase();
 
   if (action === 'reviews' && method === 'POST') {

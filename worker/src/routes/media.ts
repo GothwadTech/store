@@ -1,6 +1,7 @@
 import { parseApkManifest, sha256Hex } from '../apk';
 import { isAdmin, verifyUser } from '../auth';
 import { ensureSchema, findApp, getDeveloperForUser, hasD1 } from '../db';
+import { handleFdroidDownload } from '../fdroid';
 import { brandFor, canonicalStoreOrigin, err, githubOwnerRepo, githubToken, json, readJson } from '../http';
 import { num, str, toBool } from '../mappers';
 import type { AuthUser, D1Database, Env, ExecutionContext, Row } from '../types';
@@ -306,6 +307,9 @@ export async function handleApkUpload(req: Request, env: Env): Promise<Response>
 }
 
 export async function handleApkDownload(req: Request, env: Env, releaseId: string): Promise<Response> {
+  if (releaseId.toLowerCase().startsWith('fdroid:')) {
+    return handleFdroidDownload(req, env, releaseId);
+  }
   if (!hasD1(env)) return err('unconfigured', 'The Store database is not configured yet; downloads are unavailable.', 503);
   await ensureSchema(env.DB, env);
 

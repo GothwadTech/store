@@ -1,41 +1,41 @@
-# 🧑‍💻 DEVELOPER GUIDE — Kiwi Store par app kaise publish karein
+# 🧑‍💻 DEVELOPER GUIDE — Publishing Android Apps on Kiwi Store
 
-## 1. Developer bano
-`storeconsole.gothwadtech.com` kholo → **Sign in with Gothwad** (wahi account jo
-Mail/Chat me hai; `/u/0..5` multi-account switcher se account switch bhi kar sakte ho)
-→ ek-baar ki developer registration (naam, organisation, support email). Koi fees nahi hai.
+Anyone with a **Gothwad Account** can publish Android apps and games on **Kiwi Store** for free.
 
-## 2. App banao
-**Create app** → naam + **package name** (`com.tumhari.app`) + category.
-⚠️ Package name baad me badla **nahi** jayega — aur kisi ki li hui package
-id dobara nahi milegi.
+---
 
-## 3. Listing taiyaar karo
-- Title, short description (80 akshar), full description
-- Icon 512×512 + kam se kam **2 screenshots** (browser upload se pehle unhe
-  `≤ 380 KB` WebP me optimize karta hai aur Worker unhe D1 `store_images` +
-  Cloudflare Edge Cache CDN `/api/images/:id` par store karta hai)
-- Privacy policy URL (agar app personal data leta hai to lazmi)
+## 1. Register as a Developer
 
-## 4. APK upload karo
-**Releases → Upload a new release** → signed APK file chuno. Har supported APK
-(**maximum 50 MB**) GitHub `storefiles` Releases par secure Worker upload se
-jata hai. Upload me live byte progress dikhega; connection temporary drop ho
-to same APK ko phir select karke retry karna safe hai.
+1. Open **`https://kiwiconsole.gothwadtech.com`**.
+2. If you are already signed in to any Gothwad service (`accounts`, `mail`, `kiwistore`), your session is detected automatically via silent SSO. Otherwise, click **Sign in**.
+3. Complete the one-time developer registration form (Display Name, Organization Name, Support Email, optional Website). There are no registration fees.
 
-Version name (`1.0.0`) + badhta hua version code (`1`, `2`, `3`...) +
-"What's new" likho → **Upload & create release** → **Submit for review**.
+---
 
-## 5. Manual review
-Har naya APK pehle admin review se guzrega (Play Store jaisa):
-- App sach me khulti hai, naam/icon kisi aur ki chori nahi
-- Khatarnak permissions (SMS, contacts, accessibility) ka kaaran saaf hai
-- **Pirated / mod APK hargiz nahi** — aisi app reject + developer ban hoga
+## 2. Create an App Listing
 
-Approve → app `store.gothwadtech.com` par live. Reject → admin ka kaaran
-Console me dikhega, sudhaar karke phir submit kar do. Listing ke text/photo
-wale badlav bina review live hote hain; APK hamesha review se hi jayega.
+1. Click **Create app** and enter:
+   - **App Name**
+   - **Package Name** (e.g. `com.example.myapp` — must be unique and cannot be changed once created)
+   - **Kind** (`app` or `game`) and **Category**
+2. Fill out the store listing details:
+   - **Short Description** and **Full Description**
+   - **App Icon** (512×512 PNG/JPG/WebP) and **3–8 Screenshots** (automatically compressed in the browser to `<= 380 KB` WebP and served via D1 `store_images` + Cloudflare Edge Cache CDN `/api/images/:id`)
+   - **Privacy Policy URL** and **Support Email**
 
-## 6. Live ke baad
-Console me: downloads ke charts (**Statistics**), users ke **Reviews** aur
-un par tumhare jawab, aur kabhi bhi **Unpublish / Publish again** — sab milega.
+---
+
+## 3. Upload an APK & Submit for Review
+
+1. Open the **Releases** tab for your app and select your signed `.apk` file (`<= 50 MB`).
+2. Kiwi Console automatically inspects the binary `AndroidManifest.xml` inside the APK to pre-fill `packageName`, `versionCode`, `versionName`, `minSdk`, `targetSdk`, and requested Android permissions.
+3. Add release notes (changelog) and upload the APK. Live byte-level upload progress is shown while the Worker uploads the binary to GitHub Releases (`GothwadTech/storefiles`).
+4. Click **Submit for review** to send the release to the Kiwi Admin moderation queue.
+
+---
+
+## 4. Review Standards & Post-Publication Management
+
+- **Manual Moderation**: Every APK release is reviewed before going live to ensure the app launches properly, metadata is accurate, and requested permissions match the app's functionality.
+- **Zero Piracy / Malware**: Pirated, modded, or malicious APKs are rejected and result in developer suspension.
+- **Listing Updates & Analytics**: Text and screenshot updates can be saved at any time. In Kiwi Console you can view daily download charts, reply to user reviews, and unpublish or relist your app whenever needed.

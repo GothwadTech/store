@@ -1,6 +1,6 @@
 // ── Kiwi Store config ────────────────────────────────────────────────
-// App name aur domains KABHI yahan (ya kisi component me) hardcode nahi karte
-// (Accounts Rule #1). Single source of truth = shared/brand.ts, override = env.
+// Never hardcode app names or domains in components.
+// Single source of truth = shared/brand.ts, overridden via environment variables:
 //   Frontend : .env / Pages env vars   -> VITE_APP_NAME, VITE_APP_DOMAIN,
 //              VITE_STORE_URL, VITE_CONSOLE_URL, VITE_ADMIN_URL, VITE_STOREAPP_URL
 //   Worker   : dashboard vars / wrangler.toml -> APP_NAME, APP_DOMAIN, *_HOST
@@ -17,7 +17,7 @@ import type { SiteMode } from '../../shared/brand';
 export type { SiteMode };
 export { SITE_MODES, seoFor };
 
-/** Env (VITE_*) + defaults shared/brand.ts se - yahi object poori app use karti hai. */
+/** Resolved brand configuration from VITE_* env variables and shared/brand.ts defaults. */
 export const BRAND = resolveBrand(import.meta.env as Record<string, unknown>);
 
 export const APP_NAME = BRAND.appName;
@@ -42,14 +42,14 @@ function isSiteMode(value: string | null): value is SiteMode {
   return SITE_MODES.some((m) => m.id === value);
 }
 
-/** Kaunsi site chal rahi hai - configured site hosts se. Preview/local par ?mode= ya ?surface= se switch. */
+/** Detect active surface from the current hostname, or ?mode= / ?surface= on local preview hosts. */
 export function detectMode(): SiteMode {
   const host = normalizeHost(window.location.hostname);
   const fromHost = modeForHost(host, BRAND);
   if (fromHost) return fromHost;
   // Never consult local preview settings on a production hostname.
   if (isBrandHost(host, BRAND.appDomain)) return 'store';
-  // Local / Cloudflare preview (*.e2b.app, localhost) - query ya saved choice
+  // Local / Cloudflare preview (*.e2b.app, localhost) - query or saved choice
   const params = new URLSearchParams(window.location.search);
   const q = params.get('mode') ?? params.get('surface');
   if (q === 'app') return 'storeapp';

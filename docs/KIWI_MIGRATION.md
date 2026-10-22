@@ -1,64 +1,66 @@
-# 🥝 KIWI_MIGRATION.md — Cloudflare D1 Migration & Domain Configuration Guide
+# 🥝 KIWI STORE — Domain, D1 & SSO Configuration Reference
 
-Yeh doc `GothwadTech/store` ke **100% Zero-Card Cloudflare D1 + D1 BLOB Edge Cache**
-migration aur brand/domain configuration ka reference hai.
+This document summarizes the production domain mapping, Cloudflare D1 binding, Worker routes, and brand configuration for **Kiwi Store**.
 
-## 1. Storage & Database Architecture (Zero-Card)
+---
 
-| Layer | Purana | Ab (Production) |
-|-------|--------|-----------------|
-| **Database** | Supabase Postgres | **Cloudflare D1** (`store`, `a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`) |
-| **Images** | ImgBB API | **D1 `store_images` BLOB** + **Cloudflare Edge Cache (`caches.default`)** (`/api/images/:id`) |
-| **APKs (≤ 50 MB)** | GitHub `GothwadTech/storefiles` | **GitHub `GothwadTech/storefiles`** (Worker proxy download `/api/download/:releaseId`) |
-| **Auth / SSO** | `localStorage` Bearer token | **`.gothwadtech.com` HttpOnly SSO Cookies** + `/u/0..5` Multi-Account + Bearer fallback for Android `storeapp` |
+## 1. Production Subdomains (`*.gothwadtech.com`)
 
-## 2. Production Domains (4 Surfaces, 1 Pages Project + 1 Worker)
+| Surface | Production URL | Worker API Route |
+|---|---|---|
+| **Store** | `https://kiwistore.gothwadtech.com` | `kiwistore.gothwadtech.com/api/*` |
+| **Developer Console** | `https://kiwiconsole.gothwadtech.com` | `kiwiconsole.gothwadtech.com/api/*` |
+| **Admin Panel** | `https://kiwiadmin.gothwadtech.com` | `kiwiadmin.gothwadtech.com/api/*` |
+| **Store App Landing** | `https://kiwiapp.gothwadtech.com` | `kiwiapp.gothwadtech.com/api/*` |
 
-| Site | Default Host (`shared/brand.ts`) | Alternate Alias Supported |
-|------|----------------------------------|---------------------------|
-| 🛍️ Store | `store.gothwadtech.com` | `kiwistore.gothwadtech.com` |
-| 🧑‍💻 Console | `storeconsole.gothwadtech.com` | `kiwiconsole.gothwadtech.com` |
-| 🛡️ Admin | `storeadmin.gothwadtech.com` | `kiwiadmin.gothwadtech.com` |
-| 📱 Store App | `storeapp.gothwadtech.com` | `kiwiapp.gothwadtech.com` |
+All four subdomains are single-level subdomains covered by Cloudflare Universal SSL (`*.gothwadtech.com`) and share `.gothwadtech.com` HttpOnly SSO cookies.
 
-Chaaro **one-level** subdomain hain → Cloudflare ka free **Universal SSL**
-(`*.gothwadtech.com`) inhe cover kar leta hai.
+---
 
-## 3. Cloudflare D1 Setup & Schema
+## 2. Cloudflare D1 & Worker Routes (`worker/wrangler.toml`)
 
-`worker/wrangler.toml` me D1 binding pehle se wired hai:
 ```toml
+name = "kiwi-store-api"
+main = "src/index.ts"
+compatibility_date = "2025-02-01"
+keep_vars = true
+
+routes = [
+  { pattern = "kiwistore.gothwadtech.com/api/*", zone_name = "gothwadtech.com" },
+  { pattern = "kiwiconsole.gothwadtech.com/api/*", zone_name = "gothwadtech.com" },
+  { pattern = "kiwiadmin.gothwadtech.com/api/*", zone_name = "gothwadtech.com" },
+  { pattern = "kiwiapp.gothwadtech.com/api/*", zone_name = "gothwadtech.com" }
+]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "store"
 database_id = "a3dc3e71-cf89-4e0a-89d1-693fcf6f227a"
 ```
 
-SQL files (`sql/`):
-- `sql/00_d1_console_bootstrap.sql` — 100% comment-free, `PRAGMA`-free idempotent SQL (Cloudflare D1 Console paste ke liye).
-- `sql/01_store_schema.sql` — Full annotated D1 SQLite schema + 12 categories + 5 official Gothwad ecosystem apps (`wrangler d1 execute` ke liye).
+---
 
-## 4. Worker Secrets & Variables
+## 3. Environment Variables & Secrets
 
-- `keep_vars = true` `worker/wrangler.toml` me enabled hai taaki deploy par Cloudflare Dashboard variables delete na hon.
-- Sirf ek secret optional hai (APK uploads ke liye):
+- `keep_vars = true` is enabled in `worker/wrangler.toml` so Cloudflare Dashboard variables are preserved across deployments.
+- Optional Worker secret for APK uploads to `GothwadTech/storefiles`:
   ```bash
-  npx wrangler secret put GITHUB_TOKEN --config worker/wrangler.toml
+  cd worker
+  npx wrangler secret put GITHUB_TOKEN
   ```
-  (`GITHUB_FILES_TOKEN` alias bhi supported hai).
-- Supabase (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) aur ImgBB (`IMGBB_API_KEY`) poori tarah hata diye gaye hain.
+  (`GITHUB_FILES_TOKEN` is also supported as an alias.)
+- Legacy `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `IMGBB_API_KEY` are completely removed.
 
-## 5. Future me naam/domain badalna ho (code touch kiye bina)
+---
 
-| Kya badalna hai | Pages (Environment variables) | Worker (Variables / `wrangler.toml`) |
-|-----------------|------------------------------|--------------------------------------|
-| Sirf app ka naam | `VITE_APP_NAME`, `VITE_APP_SHORT_NAME` | `APP_NAME`, `APP_SHORT_NAME` |
-| Poora zone (sabhi sites) | `VITE_APP_DOMAIN` | `APP_DOMAIN` |
-| Ek site ka subdomain | `VITE_CONSOLE_HOST` (etc.) | `CONSOLE_HOST` (etc.) |
-| Ek site ka poora URL (dusra zone) | `VITE_CONSOLE_URL` (etc.) | `CONSOLE_URL` (etc.) |
-| Store Android app ka package | `VITE_STOREAPP_PACKAGE` | `STOREAPP_PACKAGE` |
-| Accounts ka URL/client_id | `VITE_ACCOUNTS_SIGNIN_URL`, `VITE_ACCOUNTS_API_URL`, `VITE_OAUTH_CLIENT_ID` | `AUTH_SIGNIN_URL`, `AUTH_HUB_URL`, `OAUTH_CLIENT_ID` |
+## 4. Customizing Brand or Domain Names Without Code Changes
 
-Defaults sirf **`shared/brand.ts`** me hain; browser (`src/lib/config.ts`), build
-(`vite.config.ts` → `index.html` tokens + `manifest.json`) aur Worker
-(`worker/src/index.ts`) teeno wahi se padhte hain.
+All defaults live in **`shared/brand.ts`** and are consumed by the browser (`src/lib/config.ts`), Vite build (`vite.config.ts`), and Worker (`worker/src/index.ts`):
+
+| Setting | Pages Environment Variable | Worker Variable (`wrangler.toml`) |
+|---|---|---|
+| Store brand name | `VITE_APP_NAME=My Store` | `APP_NAME=My Store` |
+| Short brand name | `VITE_APP_SHORT_NAME=My` | `APP_SHORT_NAME=My` |
+| Root domain | `VITE_APP_DOMAIN=example.com` | `APP_DOMAIN=example.com` |
+| Subdomain prefixes | `VITE_STORE_HOST`, `VITE_CONSOLE_HOST`, `VITE_ADMIN_HOST`, `VITE_STOREAPP_HOST` | `STORE_HOST`, `CONSOLE_HOST`, `ADMIN_HOST`, `STOREAPP_HOST` |
+| Accounts URLs | `VITE_ACCOUNTS_API_URL`, `VITE_ACCOUNTS_SIGNIN_URL` | `AUTH_HUB_URL`, `AUTH_SIGNIN_URL` |

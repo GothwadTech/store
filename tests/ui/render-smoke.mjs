@@ -1,6 +1,6 @@
-// Built bundle ko jsdom me chala kar chaaro surfaces ka render verify karta hai.
-// Chalane ka tarika:  npm run test:ui   (pehle `vite build` hota hai)
-// Har case alag process me chalta hai (lazy chunks ki React copy alag na ho).
+// Render-smoke test that runs the built bundle inside jsdom across all four surfaces.
+// Run via: npm run test:ui (after `vite build`).
+// Each case runs in an isolated child process so lazy chunks share a single React instance.
 import { readFileSync, readdirSync } from 'node:fs';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { pathToFileURL } from 'node:url';
@@ -64,8 +64,8 @@ const CASES = [
   { name: 'store app landing (kiwiapp)', url: 'https://kiwiapp.gothwadtech.com/', expect: ['in one place.', 'Download the APK', 'Are you a developer?'], both: ['safe-bottom sticky bottom-0', 'lg:grid-cols-2'] },
 ];
 
-// Bina index ke: har case ko alag child process me chalao (React ki ek hi copy
-// per process, warna lazy chunks "invalid hook call" dete hain).
+// Without an explicit case index, spawn each case in its own child process so lazy
+// chunks never create duplicate React instances.
 if (process.argv[3] === undefined) {
   const { spawnSync } = await import('node:child_process');
   let failed = 0;

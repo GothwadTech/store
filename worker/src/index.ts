@@ -7,6 +7,7 @@ import {
   handleMe,
 } from './auth';
 import { ensureSchema, hasD1 } from './db';
+import { handleFdroidCatalogRoute, handleFdroidIcon } from './fdroid';
 import { err, githubToken, json, noContent, withCorsAndCookies } from './http';
 import {
   handleAdminAppAction,
@@ -103,8 +104,19 @@ async function route(req: Request, env: Env, ctx?: ExecutionContext): Promise<Re
     return handleApkDownload(req, env, decodeURIComponent(dlMatch[1]));
   }
 
-  // ── Public Store Catalog ─────────────────────────────────────────
+  // ── Public Store Catalog (Kiwi Store D1 + F-Droid Open Source) ───
   if (path === '/api/store/categories' && method === 'GET') return handleStoreCategories(env);
+  if (path === '/api/store/fdroid' && method === 'GET') {
+    return handleFdroidCatalogRoute(req, env, url);
+  }
+  const fdroidIconMatch = path.match(/^\/api\/store\/fdroid\/icon\/([^/]+)$/);
+  if (fdroidIconMatch && method === 'GET') {
+    return handleFdroidIcon(req, env, decodeURIComponent(fdroidIconMatch[1]));
+  }
+  const fdroidDetailMatch = path.match(/^\/api\/store\/fdroid\/([^/]+)$/);
+  if (fdroidDetailMatch && method === 'GET') {
+    return handleStoreAppDetail(`fdroid:${decodeURIComponent(fdroidDetailMatch[1])}`, env, req);
+  }
   if (
     (path === '/api/store/apps' ||
       path === '/api/store/home' ||
@@ -112,7 +124,7 @@ async function route(req: Request, env: Env, ctx?: ExecutionContext): Promise<Re
       path === '/api/store/charts') &&
     method === 'GET'
   ) {
-    return handleStoreCatalog(url, env);
+    return handleStoreCatalog(url, env, req);
   }
   if (path === '/api/store/library' && method === 'GET') return handleGetLibrary(req, env);
   if (path === '/api/store/wishlist' && method === 'GET') return handleGetWishlist(req, env);
@@ -131,7 +143,7 @@ async function route(req: Request, env: Env, ctx?: ExecutionContext): Promise<Re
 
   const appDetail = path.match(/^\/api\/store\/apps\/(.+)$/);
   if (appDetail && method === 'GET') {
-    return handleStoreAppDetail(decodeURIComponent(appDetail[1]), env);
+    return handleStoreAppDetail(decodeURIComponent(appDetail[1]), env, req);
   }
 
   // ── Developer Console (/api/dev/* and /api/console/* aliases) ────
