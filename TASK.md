@@ -22,9 +22,11 @@
   - Added automatic direct browser silent SSO fallback (`fetchDirectAccountsSession()` -> `GET https://api.gothwadtech.com/api/auth/me` with `credentials: 'include'`) in `src/lib/auth.ts` and `src/lib/api.ts`.
   - Replaced third-party web `/oauth/authorize` consent flows and `"Sign in with Gothwad"` labels with direct first-party `"Sign in"` (`https://accounts.gothwadtech.com/signin?next=<current_url>`), while preserving `Authorization: Bearer <token>` and `POST /api/auth/exchange` for the native Android `storeapp`.
 
-- [x] **Universal Google-Style Account Switcher (`window.GothwadAccountMenu`)**:
+- [x] **Universal Google-Style Account Switcher (`window.GothwadAccountMenu`) & Post-Merge Hardening**:
   - Updated `src/shared/AccountMenu.tsx` and `src/shared/gothwadAccountMenuFallback.ts` to load `https://accounts.gothwadtech.com/widget/account-menu.js` (`window.GothwadAccountMenu.open(state, opts)`) with a resilient Shadow-DOM fallback for offline/local environments.
-  - Supports multi-account slot switching (`0..5`, `/u/0`..`/u/5`, `?authuser=N`, `X-Gothwad-Authuser`), per-slot sign-out, sign-out-all, and cross-surface quick actions (`Kiwi Store`, `Kiwi Console`, `Kiwi Admin`).
+  - Fixed `onSignOutAccount` (`resolveSignOutSlotId` / `signOutAccountSlot`) so primitive slot IDs (`onSignOutAccount("b", target)`) and account objects (`onSignOutAccount({ id: "b" })`) strictly sign out only that single slot (`/api/auth/accounts/b/signout`) and never wipe all browser accounts.
+  - Added Google-style `+N` multi-account badge on the header avatar trigger when `accounts.length > 1`, plus `{ id, label, href, onClick }` cross-surface actions (`Kiwi Store`, `Kiwi Console`, `Kiwi Admin`).
+  - Extracted zero-React URL/slot helpers into `src/lib/authuser.ts` and pinned `"typescript": "^5.8.3"` in `package.json` so `rm -rf node_modules && npm ci && npm run lint && npm test && npm run build` succeeds cleanly.
 
 - [x] **Strict Code Hygiene & `<= 500` Lines Per File**:
   - Every source, Worker, SQL, test, and documentation file is strictly `<= 500` lines and written in 100% pure English.
@@ -34,8 +36,10 @@
 ## 2. Verification Commands
 
 ```bash
-npm run lint      # 0 errors (ESLint + TypeScript)
-npm test          # Unit + integration tests (D1 SQLite, F-Droid, Silent SSO, Account Menu, <= 500 lines)
-npm run build     # Vite production bundle
-npm run test:ui   # 8/8 JSDOM render smoke tests across Store, Console, Admin, and StoreApp
+rm -rf node_modules && npm ci
+npm run lint                                # 0 errors (TypeScript web + worker)
+npm test                                    # 43/43 unit + integration tests passing
+npm run build                               # Vite production bundle
+npm run test:ui                             # 8/8 JSDOM render smoke tests passing
+(cd worker && npx wrangler deploy --dry-run) # Cloudflare Worker + D1 binding validation
 ```

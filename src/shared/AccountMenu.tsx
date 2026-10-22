@@ -4,6 +4,7 @@ import {
   accountsWebOrigin,
   buildSignInUrl,
   manageAccountUrl,
+  resolveSignOutSlotId,
 } from '../lib/auth';
 import { BRAND, SITE_URLS, detectMode } from '../lib/config';
 import { useApp } from '../lib/AppContext';
@@ -41,6 +42,7 @@ export function AccountMenu({
   }
 
   const avatarSrc = user.avatarUrl || user.picture;
+  const extraAccountCount = Math.max(0, accounts.length - 1);
 
   const handleOpen = async () => {
     const widget = await ensureGothwadAccountMenu();
@@ -98,13 +100,34 @@ export function AccountMenu({
     const mode = detectMode();
     const extraActions: WidgetExtraAction[] = [];
     if (mode !== 'store') {
-      extraActions.push({ id: 'store', label: `${BRAND.storeName}`, href: SITE_URLS.store });
+      extraActions.push({
+        id: 'store',
+        label: BRAND.storeName,
+        href: SITE_URLS.store,
+        onClick: () => {
+          window.location.href = SITE_URLS.store;
+        },
+      });
     }
     if (mode !== 'console') {
-      extraActions.push({ id: 'console', label: `${BRAND.consoleName}`, href: SITE_URLS.console });
+      extraActions.push({
+        id: 'console',
+        label: BRAND.consoleName,
+        href: SITE_URLS.console,
+        onClick: () => {
+          window.location.href = SITE_URLS.console;
+        },
+      });
     }
     if (isAdmin && mode !== 'admin') {
-      extraActions.push({ id: 'admin', label: `${BRAND.adminName}`, href: SITE_URLS.admin });
+      extraActions.push({
+        id: 'admin',
+        label: BRAND.adminName,
+        href: SITE_URLS.admin,
+        onClick: () => {
+          window.location.href = SITE_URLS.admin;
+        },
+      });
     }
 
     widget.open(
@@ -127,8 +150,9 @@ export function AccountMenu({
         onSwitchAccount: async (acc) => {
           await switchAccount({ id: acc.id, authuser: acc.authuser });
         },
-        onSignOutAccount: async (acc) => {
-          await signOutSlot(acc.id);
+        onSignOutAccount: async (slotOrAccount: string | { id?: string; slot?: string }, targetAccount?: { id?: string; slot?: string } | null) => {
+          const slotId = resolveSignOutSlotId(slotOrAccount, targetAccount);
+          if (slotId) await signOutSlot(slotId);
         },
         onSignOutAll: async () => {
           await signOut();
@@ -146,19 +170,29 @@ export function AccountMenu({
         aria-haspopup="dialog"
         aria-label={`Account menu (${user.email})`}
         title={`${user.name} (${user.email})`}
-        className="grid place-items-center overflow-hidden rounded-full ring-2 ring-white/10 transition hover:ring-emerald-400/60"
+        className="relative grid place-items-center rounded-full ring-2 ring-white/10 transition hover:ring-emerald-400/60"
         style={{ width: size, height: size }}
       >
-        {avatarSrc ? (
-          <img
-            src={avatarSrc}
-            alt={user.name}
-            width={size}
-            height={size}
-            className="h-full w-full rounded-full object-cover"
-          />
-        ) : (
-          <Avatar name={user.name} size={size} />
+        <span className="h-full w-full overflow-hidden rounded-full">
+          {avatarSrc ? (
+            <img
+              src={avatarSrc}
+              alt={user.name}
+              width={size}
+              height={size}
+              className="h-full w-full rounded-full object-cover"
+            />
+          ) : (
+            <Avatar name={user.name} size={size} />
+          )}
+        </span>
+        {extraAccountCount > 0 && (
+          <span
+            aria-label={`${extraAccountCount} more signed-in account${extraAccountCount > 1 ? 's' : ''}`}
+            className="pointer-events-none absolute -bottom-1 -right-1 rounded-full border border-[#1f1f1f] bg-[#0b57d0] px-1 text-[10px] font-bold leading-4 text-white"
+          >
+            +{extraAccountCount}
+          </span>
         )}
       </button>
     </div>

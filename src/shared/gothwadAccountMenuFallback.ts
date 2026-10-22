@@ -49,7 +49,10 @@ export interface WidgetMenuOptions {
   accountHref?: (acc: WidgetAccountItem, index: number) => string;
   extraActions?: WidgetExtraAction[];
   onSwitchAccount?: (acc: WidgetAccountItem, index: number) => void | Promise<void>;
-  onSignOutAccount?: (acc: WidgetAccountItem) => void | Promise<void>;
+  onSignOutAccount?: (
+    slotOrAccount: string | WidgetAccountItem,
+    account?: WidgetAccountItem | null,
+  ) => void | Promise<void>;
   onSignOutAll?: () => void | Promise<void>;
   onEditAvatar?: () => void;
   onManageAccount?: (href: string) => void;
@@ -144,8 +147,12 @@ function createLocalFallbackMenu(): GothwadAccountMenuGlobal {
         .manage-btn { display: inline-flex; align-items: center; justify-content: center; padding: 9px 22px; border-radius: 999px; border: 1px solid #8e918f; color: #a8c7fa; text-decoration: none; font-size: 13px; font-weight: 500; }
         .manage-btn:hover { background: rgba(168,199,250,0.08); }
         .card { background: #141414; border-radius: 20px; overflow: hidden; margin-top: 8px; }
-        .acc-toggle, .action-row, .slot-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: transparent; border: 0; border-bottom: 1px solid rgba(255,255,255,0.06); color: #e3e3e3; font-size: 13px; text-align: left; text-decoration: none; cursor: pointer; box-sizing: border-box; }
-        .acc-toggle:hover, .action-row:hover, .slot-row:hover { background: rgba(255,255,255,0.05); }
+        .acc-toggle, .action-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: transparent; border: 0; border-bottom: 1px solid rgba(255,255,255,0.06); color: #e3e3e3; font-size: 13px; text-align: left; text-decoration: none; cursor: pointer; box-sizing: border-box; }
+        .acc-toggle:hover, .action-row:hover, .slot-switch:hover { background: rgba(255,255,255,0.05); }
+        .slot-item { display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.06); padding-right: 10px; }
+        .slot-switch { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: transparent; border: 0; color: #e3e3e3; text-align: left; cursor: pointer; }
+        .slot-signout { background: transparent; border: 1px solid rgba(255,255,255,0.14); color: #c4c7c5; border-radius: 999px; padding: 4px 10px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
+        .slot-signout:hover { background: rgba(255,255,255,0.08); color: #fff; }
         .action-row:last-child { border-bottom: 0; }
         .avatar-sm { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; font-size: 13px; font-weight: 600; color: #fff; overflow: hidden; flex-shrink: 0; }
         .avatar-sm img { width: 100%; height: 100%; object-fit: cover; }
@@ -183,15 +190,18 @@ function createLocalFallbackMenu(): GothwadAccountMenuGlobal {
               ? otherAccounts
                   .map(
                     (acc, idx) => `
-                  <button class="slot-row" data-action="switch" data-idx="${idx}">
-                    <span class="avatar-sm" style="background:${pickColor(acc.username)}">
-                      ${acc.avatarUrl ? `<img src="${esc(acc.avatarUrl)}" alt="" />` : esc((acc.name || acc.username || 'G')[0].toUpperCase())}
-                    </span>
-                    <span class="slot-meta">
-                      <span class="slot-name">${esc(acc.name || acc.username)}</span>
-                      <span class="slot-email">${esc(acc.email)}</span>
-                    </span>
-                  </button>`,
+                  <div class="slot-item">
+                    <button class="slot-switch" data-action="switch" data-idx="${idx}">
+                      <span class="avatar-sm" style="background:${pickColor(acc.username)}">
+                        ${acc.avatarUrl ? `<img src="${esc(acc.avatarUrl)}" alt="" />` : esc((acc.name || acc.username || 'G')[0].toUpperCase())}
+                      </span>
+                      <span class="slot-meta">
+                        <span class="slot-name">${esc(acc.name || acc.username)}</span>
+                        <span class="slot-email">${esc(acc.email)}</span>
+                      </span>
+                    </button>
+                    <button class="slot-signout" data-action="signout-slot" data-slot-id="${esc(acc.id)}" data-idx="${idx}">Sign out</button>
+                  </div>`,
                   )
                   .join('')
               : ''
@@ -236,6 +246,29 @@ function createLocalFallbackMenu(): GothwadAccountMenuGlobal {
         close();
         if (target && opts.onSwitchAccount) {
           await opts.onSwitchAccount(target, target.authuser);
+        }
+      });
+    });
+    shadow.querySelectorAll('[data-action="signout-slot"]').forEach((el) => {
+      el.addEventListener('click', async () => {
+        const btn = el as HTMLElement;
+        const idx = Number(btn.dataset.idx ?? 0);
+        const target = otherAccounts[idx] ?? null;
+        const slotId = btn.dataset.slotId || target?.id || '';
+        close();
+        if (slotId && opts.onSignOutAccount) {
+          await opts.onSignOutAccount(slotId, target);
+        }
+      });
+    });
+    shadow.querySelectorAll('[data-extra]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        const idx = Number((el as HTMLElement).dataset.extra ?? 0);
+        const action = opts.extraActions?.[idx];
+        close();
+        if (typeof action?.onClick === 'function') {
+          e.preventDefault();
+          action.onClick();
         }
       });
     });
