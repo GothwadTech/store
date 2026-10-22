@@ -1,10 +1,19 @@
 // ── Worker API client ───────────────────────────────────────────────
-// All frontend ↔ backend communication goes through /api/*; the browser
-// never connects directly to Supabase. This client reports unavailable data
-// as such; AppContext enables sample fallbacks only on non-production hosts.
+// All frontend ↔ backend communication goes through /api/* on the Cloudflare
+// Worker backed by Cloudflare D1 (`store`).
 import { API_BASE } from './config';
 import { authHeaders } from './auth';
-import type { AppRelease, Category, Developer, GothwadUser, ReportItem, Review, StoreApp, Submission } from '../types';
+import type {
+  AccountSlotItem,
+  AppRelease,
+  Category,
+  Developer,
+  GothwadUser,
+  ReportItem,
+  Review,
+  StoreApp,
+  Submission,
+} from '../types';
 
 export class ApiError extends Error {
   status: number;
@@ -15,12 +24,14 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
-    this.retryable = status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
+    this.retryable =
+      status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
   }
 }
 
 const RETRYABLE_STATUS = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
-const sleep = (milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+const sleep = (milliseconds: number) =>
+  new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
 function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
@@ -33,7 +44,11 @@ function parseError(status: number, data: unknown, fallback: string): ApiError {
 
 async function responseData(res: Response): Promise<unknown> {
   const text = await res.text();
-  try { return text ? JSON.parse(text) : null; } catch { return null; }
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -45,7 +60,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init.headers ?? {}) },
     });
   } catch {
-    throw new ApiError(0, 'network', 'Could not reach the Store API. Check your connection and try again.');
+    throw new ApiError(
+      0,
+      'network',
+      'Could not reach the Store API. Check your connection and try again.',
+    );
   }
   const data = await responseData(res);
   if (!res.ok) throw parseError(res.status, data, `Request failed (${res.status})`);
@@ -60,8 +79,7 @@ interface XhrUploadOptions {
 
 /**
  * XMLHttpRequest is deliberate here: fetch still does not expose request-body
- * progress in browsers. APK/image uploads now show actual bytes sent instead
- * of sitting at "0%" until the server returns.
+ * progress in browsers. APK/image uploads show actual bytes sent.
  */
 function xhrJson(
   method: 'POST' | 'PUT',
@@ -79,25 +97,55 @@ function xhrJson(
       callback();
     };
     const abort = () => {
-      try { xhr.abort(); } catch { /* no-op */ }
+      try {
+        xhr.abort();
+      } catch {
+        /* no-op */
+      }
       finish(() => reject(new ApiError(0, 'aborted', 'Upload cancelled.')));
     };
 
     xhr.open(method, url);
     xhr.withCredentials = true;
     xhr.timeout = options.timeoutMs ?? 180_000;
-    for (const [header, value] of Object.entries(authHeaders())) xhr.setRequestHeader(header, value);
+    for (const [header, value] of Object.entries(authHeaders())) {
+      xhr.setRequestHeader(header, value);
+    }
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && event.total > 0) options.onProgress?.(Math.min(1, event.loaded / event.total));
+      if (event.lengthComputable && event.total > 0) {
+        options.onProgress?.(Math.min(1, event.loaded / event.total));
+      }
     };
     xhr.onload = () => {
       let data: unknown = null;
-      try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { /* handled below */ }
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        /* handled below */
+      }
       if (xhr.status >= 200 && xhr.status < 300) finish(() => resolve(data));
       else finish(() => reject(parseError(xhr.status, data, `Upload failed (${xhr.status})`)));
     };
-    xhr.onerror = () => finish(() => reject(new ApiError(0, 'network', 'The upload lost its network connection. Please try again.')));
-    xhr.ontimeout = () => finish(() => reject(new ApiError(408, 'timeout', 'The upload took too long. Check your connection and try again.')));
+    xhr.onerror = () =>
+      finish(() =>
+        reject(
+          new ApiError(
+            0,
+            'network',
+            'The upload lost its network connection. Please try again.',
+          ),
+        ),
+      );
+    xhr.ontimeout = () =>
+      finish(() =>
+        reject(
+          new ApiError(
+            408,
+            'timeout',
+            'The upload took too long. Check your connection and try again.',
+          ),
+        ),
+      );
     xhr.onabort = () => finish(() => reject(new ApiError(0, 'aborted', 'Upload cancelled.')));
     options.signal?.addEventListener('abort', abort, { once: true });
     xhr.send(body as XMLHttpRequestBodyInit | null);
@@ -113,30 +161,73 @@ async function retryUpload<T>(work: () => Promise<T>, attempts = 3): Promise<T> 
       lastError = error;
       const status = error instanceof ApiError ? error.status : 0;
       if (!RETRYABLE_STATUS.has(status) || attempt === attempts - 1) throw error;
-      // Small bounded backoff: it covers transient ImgBB/Worker hiccups without
-      // trapping a developer in a spinner for minutes.
       await sleep(500 * (attempt + 1));
     }
   }
-  throw lastError instanceof Error ? lastError : new ApiError(0, 'upload_failed', 'Upload failed.');
+  throw lastError instanceof Error
+    ? lastError
+    : new ApiError(0, 'upload_failed', 'Upload failed.');
 }
 
 export interface SessionInfo {
   user: GothwadUser;
   developer: Developer | null;
   isAdmin: boolean;
-  supabaseConfigured: boolean;
+  d1Configured: boolean;
+  activeSlot: string | null;
+  authuser: number;
+  accounts: AccountSlotItem[];
+  accountUrl?: string;
 }
 
 export async function fetchSession(): Promise<SessionInfo | null> {
   try {
-    const d = await request<{ user: GothwadUser; developer: Developer | null; isAdmin: boolean; configured?: { supabase?: boolean } }>('/me');
+    const d = await request<{
+      user: GothwadUser;
+      developer: Developer | null;
+      isAdmin: boolean;
+      activeSlot?: string | null;
+      activeId?: string | null;
+      authuser?: number;
+      accounts?: AccountSlotItem[];
+      accountUrl?: string;
+      configured?: { d1?: boolean; githubApk?: boolean };
+    }>('/me');
     if (!d.user) return null;
-    return { user: d.user, developer: d.developer ?? null, isAdmin: !!d.isAdmin, supabaseConfigured: !!d.configured?.supabase };
+    return {
+      user: d.user,
+      developer: d.developer ?? null,
+      isAdmin: !!d.isAdmin,
+      d1Configured: !!d.configured?.d1,
+      activeSlot: d.activeSlot ?? d.activeId ?? null,
+      authuser: typeof d.authuser === 'number' ? d.authuser : 0,
+      accounts: Array.isArray(d.accounts) ? d.accounts : [],
+      accountUrl: d.accountUrl,
+    };
   } catch {
     return null;
   }
 }
+
+export const authApi = {
+  accounts: () =>
+    request<{
+      authenticated: boolean;
+      activeId: string | null;
+      authuser: number;
+      accounts: AccountSlotItem[];
+    }>('/auth/accounts'),
+  switchAccount: (payload: { id?: string; authuser?: number }) =>
+    request<{ ok?: boolean; activeId?: string; authuser?: number }>('/auth/switch', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  signOutSlot: (slotId: string) =>
+    request<{ ok: boolean }>(`/auth/accounts/${encodeURIComponent(slotId)}/signout`, {
+      method: 'POST',
+      body: JSON.stringify({ id: slotId }),
+    }),
+};
 
 export type CatalogStatus = 'ready' | 'unconfigured' | 'unavailable';
 
@@ -148,7 +239,12 @@ export interface Catalog {
   categories: Category[];
 }
 
-interface CatalogResponse { apps?: StoreApp[]; releases?: AppRelease[]; reviews?: Review[]; source?: string }
+interface CatalogResponse {
+  apps?: StoreApp[];
+  releases?: AppRelease[];
+  reviews?: Review[];
+  source?: string;
+}
 
 /** Load live catalog records; never substitute local sample listings. */
 export async function fetchCatalog(): Promise<Catalog> {
@@ -175,13 +271,24 @@ export async function fetchCatalog(): Promise<Catalog> {
 // ── User actions (login) ────────────────────────────────────────────
 export const userApi = {
   addReview: (appId: string, rating: number, body: string) =>
-    request<{ review: Review }>(`/store/apps/${encodeURIComponent(appId)}/reviews`, { method: 'POST', body: JSON.stringify({ rating, body }) }),
+    request<{ review: Review }>(`/store/apps/${encodeURIComponent(appId)}/reviews`, {
+      method: 'POST',
+      body: JSON.stringify({ rating, body }),
+    }),
   setWishlist: (appId: string, on: boolean) =>
-    request<{ ok: boolean }>(`/store/apps/${encodeURIComponent(appId)}/wishlist`, { method: on ? 'POST' : 'DELETE' }),
+    request<{ ok: boolean }>(`/store/apps/${encodeURIComponent(appId)}/wishlist`, {
+      method: on ? 'POST' : 'DELETE',
+    }),
   report: (appId: string, reason: string, details: string) =>
-    request<{ report: ReportItem }>(`/store/apps/${encodeURIComponent(appId)}/report`, { method: 'POST', body: JSON.stringify({ reason, details }) }),
+    request<{ report: ReportItem }>(`/store/apps/${encodeURIComponent(appId)}/report`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, details }),
+    }),
   touchLibrary: (appId: string, versionCode?: number) =>
-    request<{ ok: boolean }>(`/store/apps/${encodeURIComponent(appId)}/library`, { method: 'POST', body: JSON.stringify({ versionCode }) }),
+    request<{ ok: boolean }>(`/store/apps/${encodeURIComponent(appId)}/library`, {
+      method: 'POST',
+      body: JSON.stringify({ versionCode }),
+    }),
   libraryIds: () => request<{ appIds: string[] }>('/store/library'),
   wishlistIds: () => request<{ appIds: string[] }>('/store/wishlist'),
 };
@@ -196,21 +303,40 @@ export interface DevBundle {
 }
 
 export const devApi = {
-  register: (d: { displayName: string; orgName: string; supportEmail: string; website?: string }) =>
-    request<{ developer: Developer }>('/dev/register', { method: 'POST', body: JSON.stringify(d) }),
+  register: (d: {
+    displayName: string;
+    orgName: string;
+    supportEmail: string;
+    website?: string;
+  }) => request<{ developer: Developer }>('/dev/register', { method: 'POST', body: JSON.stringify(d) }),
   bundle: () => request<DevBundle>('/dev/apps'),
   createApp: (a: Pick<StoreApp, 'name' | 'packageName' | 'category' | 'kind'>) =>
     request<{ app: StoreApp }>('/dev/apps', { method: 'POST', body: JSON.stringify(a) }),
   updateApp: (id: string, patch: Partial<StoreApp>) =>
-    request<{ app: StoreApp }>(`/dev/apps/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    request<{ app: StoreApp }>(`/dev/apps/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   setStatus: (id: string, status: 'unlisted' | 'published') =>
-    request<{ app: StoreApp }>(`/dev/apps/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    request<{ app: StoreApp }>(`/dev/apps/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   createRelease: (appId: string, payload: unknown) =>
-    request<{ release: AppRelease }>(`/dev/apps/${encodeURIComponent(appId)}/releases`, { method: 'POST', body: JSON.stringify(payload) }),
+    request<{ release: AppRelease }>(`/dev/apps/${encodeURIComponent(appId)}/releases`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   submit: (appId: string, releaseId: string) =>
-    request<{ submission: Submission }>(`/dev/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(releaseId)}/submit`, { method: 'POST', body: JSON.stringify({}) }),
+    request<{ submission: Submission }>(
+      `/dev/apps/${encodeURIComponent(appId)}/releases/${encodeURIComponent(releaseId)}/submit`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
   reply: (appId: string, reviewId: string, reply: string) =>
-    request<{ review: Review }>(`/dev/apps/${encodeURIComponent(appId)}/reviews/${encodeURIComponent(reviewId)}/reply`, { method: 'POST', body: JSON.stringify({ reply }) }),
+    request<{ review: Review }>(
+      `/dev/apps/${encodeURIComponent(appId)}/reviews/${encodeURIComponent(reviewId)}/reply`,
+      { method: 'POST', body: JSON.stringify({ reply }) },
+    ),
   stats: (appId: string, days = 7) =>
     request<{
       days: { date: string; count: number }[];
@@ -222,15 +348,31 @@ export const devApi = {
 
 // ── Admin ───────────────────────────────────────────────────────────
 export const adminApi = {
-  queue: () => request<{ submissions: Submission[]; apps: StoreApp[]; releases: AppRelease[] }>('/admin/queue'),
-  apps: () => request<{ apps: StoreApp[]; releases: AppRelease[]; submissions: Submission[] }>('/admin/apps'),
+  queue: () =>
+    request<{ submissions: Submission[]; apps: StoreApp[]; releases: AppRelease[] }>('/admin/queue'),
+  apps: () =>
+    request<{ apps: StoreApp[]; releases: AppRelease[]; submissions: Submission[] }>('/admin/apps'),
   reports: () => request<{ reports: ReportItem[] }>('/admin/reports'),
   decide: (submissionId: string, ok: boolean, note: string) =>
-    request<{ submission: Submission }>(`/admin/submissions/${encodeURIComponent(submissionId)}/${ok ? 'approve' : 'reject'}`, { method: 'POST', body: JSON.stringify({ note }) }),
-  suspend: (appId: string) => request<{ app: StoreApp }>(`/admin/apps/${encodeURIComponent(appId)}/suspend`, { method: 'POST', body: JSON.stringify({}) }),
-  restore: (appId: string) => request<{ app: StoreApp }>(`/admin/apps/${encodeURIComponent(appId)}/restore`, { method: 'POST', body: JSON.stringify({}) }),
+    request<{ submission: Submission }>(
+      `/admin/submissions/${encodeURIComponent(submissionId)}/${ok ? 'approve' : 'reject'}`,
+      { method: 'POST', body: JSON.stringify({ note }) },
+    ),
+  suspend: (appId: string) =>
+    request<{ app: StoreApp }>(`/admin/apps/${encodeURIComponent(appId)}/suspend`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  restore: (appId: string) =>
+    request<{ app: StoreApp }>(`/admin/apps/${encodeURIComponent(appId)}/restore`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   resolveReport: (reportId: string, status: 'resolved' | 'dismissed') =>
-    request<{ report: ReportItem }>(`/admin/reports/${encodeURIComponent(reportId)}/resolve`, { method: 'POST', body: JSON.stringify({ status }) }),
+    request<{ report: ReportItem }>(`/admin/reports/${encodeURIComponent(reportId)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
 };
 
 // ── Uploads ─────────────────────────────────────────────────────────
@@ -255,9 +397,12 @@ export interface UploadedApk {
 export interface UploadCallbacks {
   onProgress?: (fraction: number) => void;
   signal?: AbortSignal;
+  appId?: string;
+  purpose?: 'icon' | 'screenshot' | 'banner';
+  kind?: 'icon' | 'screenshot' | 'banner';
 }
 
-/** Image → Worker → ImgBB. It is retried for temporary network/provider errors. */
+/** Image → Worker → Cloudflare D1 `store_images` + Edge Cache (`/api/images/:id`). */
 export async function uploadImage(
   image: Blob,
   fileName = 'image.webp',
@@ -265,34 +410,59 @@ export async function uploadImage(
 ): Promise<string> {
   const result = await retryUpload(async () => {
     const form = new FormData();
-    // The pipeline produces WebP. A matching filename avoids provider-side MIME
-    // confusion when a converted PNG/JPEG kept its original extension.
     form.append('image', image, fileName.replace(/\.[^.]+$/, '') + '.webp');
+    const kind = callbacks.kind ?? callbacks.purpose;
+    if (kind) form.append('kind', kind);
     return xhrJson('POST', apiUrl('/uploads/image'), form, {
       ...callbacks,
       timeoutMs: 90_000,
     }) as Promise<{ url?: string; error?: string; message?: string }>;
   });
-  if (!result?.url) throw new ApiError(502, result?.error ?? 'upload_failed', result?.message ?? 'Image upload failed. Please try again.');
+  if (!result?.url) {
+    throw new ApiError(
+      502,
+      result?.error ?? 'upload_failed',
+      result?.message ?? 'Image upload failed. Please try again.',
+    );
+  }
   callbacks.onProgress?.(1);
   return result.url;
 }
 
 /** APK store kiye bina manifest auto-read (console form auto-fill). */
-export async function inspectApk(file: File, signal?: AbortSignal): Promise<{ manifest: ApkManifestInfo; sizeBytes: number; sha256: string }> {
+export async function inspectApk(
+  file: File,
+  signal?: AbortSignal,
+): Promise<{ manifest: ApkManifestInfo; sizeBytes: number; sha256: string }> {
   const form = new FormData();
   form.append('file', file, file.name);
-  const data = await xhrJson('POST', apiUrl('/uploads/apk-inspect'), form, { timeoutMs: 120_000, signal }) as {
-    manifest?: ApkManifestInfo; sizeBytes?: number; sha256?: string; error?: string; message?: string;
+  const data = (await xhrJson('POST', apiUrl('/uploads/apk-inspect'), form, {
+    timeoutMs: 120_000,
+    signal,
+  })) as {
+    manifest?: ApkManifestInfo;
+    sizeBytes?: number;
+    sha256?: string;
+    error?: string;
+    message?: string;
   };
-  if (!data?.manifest) throw new ApiError(502, data?.error ?? 'inspect_failed', data?.message ?? 'APK inspection failed');
-  return { manifest: data.manifest, sizeBytes: data.sizeBytes ?? file.size, sha256: data.sha256 ?? '' };
+  if (!data?.manifest) {
+    throw new ApiError(
+      502,
+      data?.error ?? 'inspect_failed',
+      data?.message ?? 'APK inspection failed',
+    );
+  }
+  return {
+    manifest: data.manifest,
+    sizeBytes: data.sizeBytes ?? file.size,
+    sha256: data.sha256 ?? '',
+  };
 }
 
 /**
  * APK upload flow: every supported APK goes through the Worker to GitHub
- * storefiles. XHR exposes actual upload bytes, and a bounded retry handles a
- * temporary connection loss without silently leaving the UI at 0%.
+ * storefiles.
  */
 export async function uploadApk(
   file: File,
@@ -311,7 +481,20 @@ export async function uploadApk(
       timeoutMs: 10 * 60_000,
     }) as Promise<UploadedApk & { error?: string; message?: string }>;
   }, 2);
-  if (!result?.url) throw new ApiError(502, result?.error ?? 'upload_failed', result?.message ?? 'APK upload failed. Please try again.');
+  if (!result?.url) {
+    throw new ApiError(
+      502,
+      result?.error ?? 'upload_failed',
+      result?.message ?? 'APK upload failed. Please try again.',
+    );
+  }
   callbacks.onProgress?.(1);
-  return { provider: 'github', url: result.url, key: result.key, sizeBytes: result.sizeBytes ?? file.size, sha256: result.sha256, manifest: result.manifest };
+  return {
+    provider: 'github',
+    url: result.url,
+    key: result.key,
+    sizeBytes: result.sizeBytes ?? file.size,
+    sha256: result.sha256,
+    manifest: result.manifest,
+  };
 }

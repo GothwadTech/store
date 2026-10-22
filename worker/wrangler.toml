@@ -1,60 +1,49 @@
-# =============================================================================
-# KIWI STORE WORKER - Cloudflare Wrangler Configuration
-# Deploy:  npm run worker:deploy
-# Local:   npm run worker:dev     (http://127.0.0.1:8787)
-# =============================================================================
-# Dashboard ke Worker ka naam isse MATCH hona chahiye: "store" (rename mat karo -
-# Worker wahi rahega, sirf custom domains/routes badalte hain)
+# ═══════════════════════════════════════════════════════════════════
+# Kiwi Store API Worker — Cloudflare Workers + Cloudflare D1 (`store`)
+#
+# Routes (Custom Domain ya Zone Route):
+#   kiwistore.gothwadtech.com/api/*
+#   kiwiconsole.gothwadtech.com/api/*
+#   kiwiadmin.gothwadtech.com/api/*
+#   kiwiapp.gothwadtech.com/api/*
+#
+# Secrets (Dashboard ya `wrangler secret put` se set karein):
+#   wrangler secret put GITHUB_FILES_TOKEN
+# ═══════════════════════════════════════════════════════════════════
+
 name = "store"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 keep_vars = true
 
-# ── PUBLIC VARIABLES (secret nahi) ──────────────────────────────────
-# Domain/name badalna ho to SIRF yeh block badlo (ya dashboard → Worker →
-# Settings → Variables). Code me kahin domain hardcode nahi hai.
+[[d1_databases]]
+binding = "DB"
+database_name = "store"
+database_id = "a3dc3e71-cf89-4e0a-89d1-693fcf6f227a"
+
 [vars]
 APP_NAME = "Kiwi Store"
 APP_SHORT_NAME = "Kiwi"
 ECOSYSTEM_NAME = "Gothwad"
 APP_DOMAIN = "gothwadtech.com"
-# Store ki apni Android app ka package (APK wahi hai jab tak rebuild na ho)
 STOREAPP_PACKAGE = "com.gothwad.store"
 
-# Chaaro sites ke subdomain -> https://<host>.<APP_DOMAIN>
 STORE_HOST = "kiwistore"
 CONSOLE_HOST = "kiwiconsole"
 ADMIN_HOST = "kiwiadmin"
 STOREAPP_HOST = "kiwiapp"
+STORE_PUBLIC_URL = "https://kiwistore.gothwadtech.com"
 
-# Koi site dusre zone/custom hostname par ho to poora URL yahan daal do
-# ( warna khaali chhod do - upar wale host + domain se ban jayega)
-STORE_URL = ""
-CONSOLE_URL = ""
-ADMIN_URL = ""
-STOREAPP_URL = ""
-
-# Server-side Accounts calls ka base (Custom Domain host - same-zone rule, Mail wala lesson)
 AUTH_HUB_URL = "https://api.gothwadtech.com"
+ACCOUNTS_API_URL = "https://api.gothwadtech.com"
 AUTH_SIGNIN_URL = "https://accounts.gothwadtech.com"
+ACCOUNTS_WEB_URL = "https://accounts.gothwadtech.com"
 OAUTH_CLIENT_ID = "kiwi-store"
-# Store ke APNE Supabase project ka URL (Accounts/Mail se alag) - yahan asal URL dalo
-SUPABASE_URL = "https://hovlmfkwpdusrvkcdbjl.supabase.co"
-# Admin ke Accounts usernames (comma separated)
 ADMIN_USERNAMES = "pawan"
-# GitHub storefiles repo (all APKs up to 50 MB yahi jayengi)
+
 GITHUB_FILES_OWNER = "GothwadTech"
 GITHUB_FILES_REPO = "storefiles"
-# CORS: chaaro site URLs apne aap allow hain; extra origin chahiye to comma separated
+GITHUB_REPO = "GothwadTech/storefiles"
+GITHUB_BRANCH = "main"
+
 ALLOWED_ORIGINS = ""
-
-# ── SECRETS (yahan kabhi mat likho - dashboard/wrangler secret put) ─
-#   SUPABASE_SERVICE_ROLE_KEY   Store wale Supabase project ki (sirf Worker me)
-#   IMGBB_API_KEY               saari images ke liye
-#   GITHUB_FILES_TOKEN          sirf storefiles repo ka fine-grained PAT
-
-# ── ROUTES (dashboard me lagana hai - docs/SETUP.md + docs/KIWI_MIGRATION.md) ─
-#   kiwistore.gothwadtech.com/api/*      -> yeh Worker
-#   kiwiconsole.gothwadtech.com/api/*    -> yeh Worker
-#   kiwiadmin.gothwadtech.com/api/*      -> yeh Worker
-#   kiwiapp.gothwadtech.com/api/*   -> yeh Worker

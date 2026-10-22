@@ -1,74 +1,76 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { createLocalD1 } from '../tools/local-d1.mjs';
 import { moduleUrl } from './helpers/ts.mjs';
 
-// Run the real Worker handler with mocked Accounts/Supabase, without a deployment.
-const apkUrl = await moduleUrl('worker/src/apk.ts');
-const brandUrl = await moduleUrl('shared/brand.ts');
 const workerUrl = await moduleUrl('worker/src/index.ts');
-// Worker ke relative imports ko inline karo (apk + shared brand config).
-const workerSource = Buffer.from(workerUrl.split(',')[1], 'base64')
-  .toString()
-  .replace("'./apk'", JSON.stringify(apkUrl))
-  .replace("'../../shared/brand'", JSON.stringify(brandUrl));
-const { default: worker } = await import(`data:text/javascript;base64,${Buffer.from(workerSource).toString('base64')}`);
+const { default: worker } = await import(workerUrl);
+const bootstrapSql = await readFile(new URL('../sql/00_d1_console_bootstrap.sql', import.meta.url), 'utf8');
 
-const env = {
-  AUTH_HUB_URL: 'https://accounts.test', SUPABASE_URL: 'https://database.test',
-  SUPABASE_SERVICE_ROLE_KEY: 'test-only', ADMIN_USERNAMES: '',
-};
+test('empty non-null listing fields stay empty strings in D1 instead of failing NOT NULL constraints', async (t) => {
+  const DB = createLocalD1();
+  await DB.exec(bootstrapSql);
+  await DB.prepare(
+    `INSERT INTO developers (id, user_id, username, display_name, org_name, support_email)
+     VALUES ('dev-test', 'user-test', 'tester', 'Tester', 'Tester', 'dev@example.test')`,
+  ).run();
+  await DB.prepare(
+    `INSERT INTO apps (
+      id, developer_id, package_name, name, status, category, kind,
+      short_desc, full_desc, icon_url, support_email
+    ) VALUES (
+      'app-test', 'dev-test', 'com.example.app', 'Example', 'draft', 'tools', 'app',
+      'Before', 'Before', 'https://image.test/icon.webp', 'dev@example.test'
+    )`,
+  ).run();
 
-test('empty non-null listing fields stay empty strings instead of causing Postgres 23502', async (t) => {
-  let app = {
-    id: 'app-test', developer_id: 'dev-test', package_name: 'com.example.app', name: 'Example',
-    status: 'draft', category: 'tools', kind: 'app', short_desc: 'Before', full_desc: 'Before',
-    icon_url: 'https://image.test/icon.webp', support_email: 'dev@example.test', tags: [],
-  };
-  const developer = { id: 'dev-test', user_id: 'user-test', username: 'tester', org_name: 'Tester', display_name: 'Tester' };
-  let write = null;
-  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+  const env = { DB, AUTH_HUB_URL: 'https://accounts.test', ADMIN_USERNAMES: '' };
+  t.mock.method(globalThis, 'fetch', async (input) => {
     const url = new URL(input);
-    if (url.href === `${env.AUTH_HUB_URL}/oauth/userinfo`) return Response.json({ sub: 'user-test', preferred_username: 'tester' });
-    assert.equal(url.origin, env.SUPABASE_URL);
-    const table = url.pathname.split('/').at(-1);
-    if (table === 'developers') return Response.json([developer]);
-    if (table === 'apps') {
-      if (init.method === 'PATCH') {
-        write = JSON.parse(init.body);
-        app = { ...app, ...write };
-        return Response.json([app]);
-      }
-      return Response.json([app]);
+    if (url.pathname.endsWith('/userinfo')) {
+      return Response.json({ sub: 'user-test', preferred_username: 'tester' });
     }
-    if (['app_screenshots', 'app_releases', 'reviews'].includes(table)) return Response.json([]);
-    assert.fail(`Unexpected table ${table}`);
+    assert.fail(`Unexpected fetch: ${url.href}`);
   });
 
-  const response = await worker.fetch(new Request('https://console.test/api/dev/apps/app-test', {
-    method: 'PATCH', headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ shortDesc: '', fullDesc: '', iconUrl: '', supportEmail: '' }),
-  }), env);
+  const response = await worker.fetch(
+    new Request('https://console.test/api/dev/apps/app-test', {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shortDesc: '', fullDesc: '', iconUrl: '', supportEmail: '' }),
+    }),
+    env,
+  );
   assert.equal(response.status, 200);
-  assert.deepEqual(write, {
-    updated_at: write.updated_at,
+  const body = await response.json();
+  assert.equal(body.app.shortDesc, '');
+  assert.equal(body.app.fullDesc, '');
+  assert.equal(body.app.iconUrl, '');
+  assert.equal(body.app.supportEmail, '');
+
+  const row = await DB.prepare('SELECT short_desc, full_desc, icon_url, support_email FROM apps WHERE id = ?')
+    .bind('app-test')
+    .first();
+  assert.deepEqual(row, {
     short_desc: '',
     full_desc: '',
     icon_url: '',
     support_email: '',
   });
+  DB.close();
 });
 
 test('the console uses one GitHub-only APK path with a conservative 50 MB cap', async () => {
-  const [storage, api, workerSourceText] = await Promise.all([
+  const [storage, api, mediaRoute] = await Promise.all([
     readFile(new URL('../src/lib/storage.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/lib/api.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../worker/src/index.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../worker/src/routes/media.ts', import.meta.url), 'utf8'),
   ]);
   assert.match(storage, /MAX_APK_SIZE_BYTES = 50 \* 1024 \* 1024/);
   assert.match(storage, /return 'github'/);
   assert.match(api, /xhrJson\('POST', apiUrl\('\/uploads\/apk'\)/);
   assert.doesNotMatch(api, /apk-ticket|presigned-put|provider === 'b2'/);
-  assert.match(workerSourceText, /const MAX_APK_SIZE = 50 \* 1024 \* 1024/);
-  assert.doesNotMatch(workerSourceText, /Backblaze|b2Presigned|apk-ticket/);
+  assert.match(mediaRoute, /export const MAX_APK_SIZE = 50 \* 1024 \* 1024/);
+  assert.doesNotMatch(mediaRoute, /Backblaze|b2Presigned|apk-ticket/);
 });

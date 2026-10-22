@@ -1,17 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { createLocalD1 } from '../tools/local-d1.mjs';
 import { moduleUrl } from './helpers/ts.mjs';
 
-const apkUrl = await moduleUrl('worker/src/apk.ts');
-const brandUrl = await moduleUrl('shared/brand.ts');
 const workerUrl = await moduleUrl('worker/src/index.ts');
-// Worker ke relative imports ko inline karo (apk + shared brand config).
-const workerSource = Buffer.from(workerUrl.split(',')[1], 'base64')
-  .toString()
-  .replace("'./apk'", JSON.stringify(apkUrl))
-  .replace("'../../shared/brand'", JSON.stringify(brandUrl));
-const { default: worker } = await import(`data:text/javascript;base64,${Buffer.from(workerSource).toString('base64')}`);
+const { default: worker } = await import(workerUrl);
+const bootstrapSql = await readFile(new URL('../sql/00_d1_console_bootstrap.sql', import.meta.url), 'utf8');
 
 test('unconfigured catalog returns empty API data instead of sample listings', async () => {
   const response = await worker.fetch(new Request('https://store.test/api/store/apps'), {});
@@ -32,43 +27,43 @@ test('unconfigured category endpoint returns no local category fixtures', async 
   assert.deepEqual(body.categories, []);
 });
 
-test('download endpoint does not expose an unapproved release', async (t) => {
-  const env = {
-    AUTH_HUB_URL: 'https://accounts.test',
-    SUPABASE_URL: 'https://database.test',
-    SUPABASE_SERVICE_ROLE_KEY: 'test-only',
-  };
-  t.mock.method(globalThis, 'fetch', async (input) => {
-    const url = new URL(input);
-    assert.equal(url.origin, env.SUPABASE_URL);
-    assert.match(url.pathname, /\/app_releases$/);
-    return Response.json([{ id: 'rel-pending', app_id: 'app-test', is_live: false, apk_url: 'https://files.test/pending.apk' }]);
-  });
+test('download endpoint does not expose an unapproved release', async () => {
+  const DB = createLocalD1();
+  await DB.exec(bootstrapSql);
+  await DB.prepare(
+    `INSERT INTO app_releases (
+      id, app_id, version_code, version_name, apk_provider, apk_key, apk_url, apk_size_bytes,
+      review_status, is_live, downloads, created_at
+    ) VALUES ('rel-pending', 'app-gothwad-mail', 2, '1.0.1', 'github', 'mail.apk', 'https://files.test/pending.apk', 1024, 'pending', 0, 0, datetime('now'))`,
+  ).run();
+
+  const env = { DB, AUTH_HUB_URL: 'https://accounts.test' };
   const response = await worker.fetch(new Request('https://store.test/api/download/rel-pending'), env);
   assert.equal(response.status, 404);
   assert.equal((await response.json()).error, 'not_found');
+  DB.close();
 });
 
-test('download endpoint does not expose a live release for an unpublished app', async (t) => {
-  const env = {
-    AUTH_HUB_URL: 'https://accounts.test',
-    SUPABASE_URL: 'https://database.test',
-    SUPABASE_SERVICE_ROLE_KEY: 'test-only',
-  };
-  t.mock.method(globalThis, 'fetch', async (input) => {
-    const url = new URL(input);
-    assert.equal(url.origin, env.SUPABASE_URL);
-    const table = url.pathname.split('/').at(-1);
-    if (table === 'app_releases') {
-      return Response.json([{ id: 'rel-draft-app', app_id: 'app-draft', is_live: true, apk_url: 'https://files.test/draft.apk' }]);
-    }
-    assert.equal(table, 'apps');
-    assert.match(url.search, /status=eq\.published/);
-    return Response.json([]);
-  });
+test('download endpoint does not expose a live release for an unpublished app', async () => {
+  const DB = createLocalD1();
+  await DB.exec(bootstrapSql);
+  await DB.prepare(
+    `INSERT INTO apps (
+      id, developer_id, package_name, name, category, kind, status, short_desc, full_desc, icon_url, support_email
+    ) VALUES ('app-draft', 'dev-gothwad', 'com.gothwad.draft', 'Draft App', 'tools', 'app', 'draft', '', '', '', 'support@gothwadtech.com')`,
+  ).run();
+  await DB.prepare(
+    `INSERT INTO app_releases (
+      id, app_id, version_code, version_name, apk_provider, apk_key, apk_url, apk_size_bytes,
+      review_status, is_live, downloads, created_at
+    ) VALUES ('rel-draft-app', 'app-draft', 1, '1.0.0', 'github', 'draft.apk', 'https://files.test/draft.apk', 1024, 'approved', 1, 0, datetime('now'))`,
+  ).run();
+
+  const env = { DB, AUTH_HUB_URL: 'https://accounts.test' };
   const response = await worker.fetch(new Request('https://store.test/api/download/rel-draft-app'), env);
   assert.equal(response.status, 404);
   assert.equal((await response.json()).error, 'not_found');
+  DB.close();
 });
 
 test('demo fixtures and identity are synchronously gated off on production (brand zone) hosts', async () => {
@@ -84,9 +79,8 @@ test('demo fixtures and identity are synchronously gated off on production (bran
   const admin = await readFile(new URL('../src/admin/AdminApp.tsx', import.meta.url), 'utf8');
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
-  assert.match(seed, /SEED_APPS/); // Fixtures remain available to local/preview.
-  // Production zone ka check shared/brand.ts me hai (env se appDomain aata hai).
-  assert.match(brand, /hostname\.toLowerCase\(\)\.replace/); // Trailing-dot DNS names are normalized.
+  assert.match(seed, /SEED_APPS/);
+  assert.match(brand, /hostname\.toLowerCase\(\)\.replace/);
   assert.match(brand, /return host === domain \|\| host\.endsWith\(`\.\$\{domain\}`\);/);
   assert.match(brand, /appDomain: 'gothwadtech\.com'/);
   assert.match(config, /isBrandHost\(window\.location\.hostname, BRAND\.appDomain\)/);
@@ -101,11 +95,11 @@ test('demo fixtures and identity are synchronously gated off on production (bran
   assert.match(context, /const isPreviewMode = demoModeAvailable/);
   assert.match(context, /if \(apiMode\(\) \|\| isLocalDemo\(\)\) return;/);
   assert.match(auth, /export const DEMO_USER/);
-  assert.match(ui, /demoModeAvailable &&/); // The prompt demo sign-in option is preview-only.
-  assert.match(store, /demoModeAvailable && <button/); // Header demo sign-in is preview-only.
+  assert.match(ui, /demoModeAvailable &&/);
+  assert.match(store, /demoModeAvailable && <button/);
   assert.match(store, /const canPreviewDownload = demoModeAvailable && isDemoUser/);
-  assert.match(notice, /if \(isPreviewMode\)/); // No preview notice on production hosts.
+  assert.match(notice, /if \(isPreviewMode\)/);
   assert.match(consoleApp, /demoModeAvailable && isDemoUser/);
   assert.match(admin, /demoModeAvailable && isDemoUser/);
-  assert.match(app, /if \(isProductionHostCheck\(\)\) return null/); // Hide the mode switcher on prod.
+  assert.match(app, /if \(isProductionHostCheck\(\)\) return null/);
 });

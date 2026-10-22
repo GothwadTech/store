@@ -1,133 +1,54 @@
-# 🥝 KIWI_MIGRATION.md — Gothwad Store → Kiwi Store (dashboard steps)
+# 🥝 KIWI_MIGRATION.md — Cloudflare D1 Migration & Domain Configuration Guide
 
-Code side **ho chuka hai** (is branch me). Yeh doc sirf un cheezon ka checklist hai jo
-repo ke bahar hain: **Cloudflare Pages, Cloudflare Worker, Gothwad Accounts**.
+Yeh doc `GothwadTech/store` ke **100% Zero-Card Cloudflare D1 + D1 BLOB Edge Cache**
+migration aur brand/domain configuration ka reference hai.
 
-### Kya NAHI badal raha (kuch mat chhedo)
+## 1. Storage & Database Architecture (Zero-Card)
 
-| Cheez | Status |
-|-------|--------|
-| Pages project (`GothwadTech/store` se juda hua) | ✅ wahi rahega |
-| Worker ka naam `store` | ✅ wahi rahega (rename mat karna) |
-| Supabase project + `SUPABASE_URL` | ✅ wahi rahega (DB data safe) |
-| Worker secrets (`SUPABASE_SERVICE_ROLE_KEY`, `IMGBB_API_KEY`, `GITHUB_FILES_TOKEN`) | ✅ wahi rahenge |
-| GitHub `GothwadTech/storefiles` (APKs) | ✅ wahi rahega |
-| Gothwad Accounts (`accounts.gothwadtech.com`) + ecosystem apps | ✅ naam/domain wahi |
+| Layer | Purana | Ab (Production) |
+|-------|--------|-----------------|
+| **Database** | Supabase Postgres | **Cloudflare D1** (`store`, `a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`) |
+| **Images** | ImgBB API | **D1 `store_images` BLOB** + **Cloudflare Edge Cache (`caches.default`)** (`/api/images/:id`) |
+| **APKs (≤ 50 MB)** | GitHub `GothwadTech/storefiles` | **GitHub `GothwadTech/storefiles`** (Worker proxy download `/api/download/:releaseId`) |
+| **Auth / SSO** | `localStorage` Bearer token | **`.gothwadtech.com` HttpOnly SSO Cookies** + `/u/0..5` Multi-Account + Bearer fallback for Android `storeapp` |
 
-### Domain map
+## 2. Production Domains (4 Surfaces, 1 Pages Project + 1 Worker)
 
-| Site | Purana | Naya |
-|------|--------|------|
+| Site | Default Host (`shared/brand.ts`) | Alternate Alias Supported |
+|------|----------------------------------|---------------------------|
 | 🛍️ Store | `store.gothwadtech.com` | `kiwistore.gothwadtech.com` |
-| 🧑‍💻 Console | `console.gothwadtech.com` | `kiwiconsole.gothwadtech.com` |
+| 🧑‍💻 Console | `storeconsole.gothwadtech.com` | `kiwiconsole.gothwadtech.com` |
 | 🛡️ Admin | `storeadmin.gothwadtech.com` | `kiwiadmin.gothwadtech.com` |
 | 📱 Store App | `storeapp.gothwadtech.com` | `kiwiapp.gothwadtech.com` |
 
 Chaaro **one-level** subdomain hain → Cloudflare ka free **Universal SSL**
-(`*.gothwadtech.com`) inhe cover kar leta hai. Koi paid certificate nahi chahiye.
+(`*.gothwadtech.com`) inhe cover kar leta hai.
 
----
+## 3. Cloudflare D1 Setup & Schema
 
-## Step 1 — Pages: naye custom domains add karo
-
-Workers & Pages → apna **Pages project** → **Custom domains** → *Set up a custom domain*:
-
-1. `kiwistore.gothwadtech.com`
-2. `kiwiconsole.gothwadtech.com`
-3. `kiwiadmin.gothwadtech.com`
-4. `kiwiapp.gothwadtech.com`
-
-Har ek par Cloudflare "Activate domain" bolega — kar do, DNS record (CNAME) wo khud
-bana dega. **Purane 4 domains abhi remove mat karna** (Step 5 tak rakho, warna live
-site beech me tutegi).
-
-Env variables: zaroori nahi (defaults code me hain). Pages → **Settings → Environment
-variables** me sirf tab dalo jab naam/domain badalna ho — see Step 6.
-
-Deploy: yeh branch merge hote hi Pages auto-build karega. Build output me
-`dist/manifest.json` **generate** hota hai (pehle static file thi) — usme
-`"name": "Kiwi Store"` aana chahiye.
-
-## Step 2 — Worker: naye routes + naye variables
-
-Worker **`store`** → **Settings → Domains & Routes** → *Add route* (zone `gothwadtech.com`):
-
-```
-kiwistore.gothwadtech.com/api/*
-kiwiconsole.gothwadtech.com/api/*
-kiwiadmin.gothwadtech.com/api/*
-kiwiapp.gothwadtech.com/api/*
+`worker/wrangler.toml` me D1 binding pehle se wired hai:
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "store"
+database_id = "a3dc3e71-cf89-4e0a-89d1-693fcf6f227a"
 ```
 
-Variables — do tarike, koi ek:
+SQL files (`sql/`):
+- `sql/00_d1_console_bootstrap.sql` — 100% comment-free, `PRAGMA`-free idempotent SQL (Cloudflare D1 Console paste ke liye).
+- `sql/01_store_schema.sql` — Full annotated D1 SQLite schema + 12 categories + 5 official Gothwad ecosystem apps (`wrangler d1 execute` ke liye).
 
-- **Aasan:** `npm run worker:deploy` — `worker/wrangler.toml` ke naye `[vars]` apply ho
-  jayenge (`keep_vars = true` hai, isliye dashboard ke baki vars/secrets nahi mitte).
-- **Dashboard:** Worker → Settings → Variables → *Add variable* (Text type):
+## 4. Worker Secrets & Variables
 
-| Variable | Value |
-|----------|-------|
-| `APP_NAME` | `Kiwi Store` |
-| `APP_SHORT_NAME` | `Kiwi` |
-| `ECOSYSTEM_NAME` | `Gothwad` |
-| `APP_DOMAIN` | `gothwadtech.com` |
-| `STORE_HOST` | `kiwistore` |
-| `CONSOLE_HOST` | `kiwiconsole` |
-| `ADMIN_HOST` | `kiwiadmin` |
-| `STOREAPP_HOST` | `kiwiapp` |
-| `OAUTH_CLIENT_ID` | `kiwi-store` |
-| `STOREAPP_PACKAGE` | `com.gothwad.store` |
+- `keep_vars = true` `worker/wrangler.toml` me enabled hai taaki deploy par Cloudflare Dashboard variables delete na hon.
+- Sirf ek secret optional hai (APK uploads ke liye):
+  ```bash
+  npx wrangler secret put GITHUB_TOKEN --config worker/wrangler.toml
+  ```
+  (`GITHUB_FILES_TOKEN` alias bhi supported hai).
+- Supabase (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) aur ImgBB (`IMGBB_API_KEY`) poori tarah hata diye gaye hain.
 
-(`STORE_URL` / `CONSOLE_URL` / `ADMIN_URL` / `STOREAPP_URL` sirf tab chahiye jab koi
-site dusre zone par ho — warna khaali chhod do.)
-
-Check: `https://kiwistore.gothwadtech.com/api/health` → `configured` me sab `true`.
-
-## Step 3 — Worker CORS khud theek ho jayega
-
-Worker allowed origins ab `APP_DOMAIN` + `*_HOST` vars se bante hain (code me
-hardcoded list nahi). Matlab Step 2 ke baad naye domains par sign-in/upload apne aap
-chalenge. Koi extra origin chahiye ho to `ALLOWED_ORIGINS` (comma separated).
-
-## Step 4 — Gothwad Accounts: client_id + redirect URIs
-
-`client_id` badla hai: `gothwad-store` → **`kiwi-store`**. Accounts ke Supabase
-(`ecosystem_apps` table) me row update karo:
-
-```sql
--- redirect URIs (chaaro naye domains + local dev)
---   https://kiwistore.gothwadtech.com/auth/callback
---   https://kiwiconsole.gothwadtech.com/auth/callback
---   https://kiwiadmin.gothwadtech.com/auth/callback
---   http://localhost:3000/auth/callback
--- scopes: profile email offline_access
-```
-
-Accounts repo ka `docs/OAUTH.md` hi is kaam ka source of truth hai (column naam wahan
-se confirm kar lena). Yeh step kiye bina sign-in par `redirect_uri not allowed` /
-`invalid_client` aayega.
-
-## Step 5 — Verify, phir purane domains hatao
-
-1. Chaaro naye domains par sign-in karke dekho (cookie SSO + OAuth dono).
-2. Console se ek test app submit → Admin approve → Store par dikhe → APK download.
-3. `kiwiapp.gothwadtech.com` ka QR scan karke dekho (QR naye URL ka banta hai).
-4. Phone par PWA: purana installed app **uninstall karke dobara Add to Home screen**
-   (manifest naam cache hota hai).
-5. **Database me Store ki apni listing** (agar pehle se hai) ka naam bhi badlo —
-   yeh data hai, code nahi. Console se edit karo ya:
-   `update public.apps set name = 'Kiwi Store' where package_name = 'com.gothwad.store';`
-   (Package name wahi rahega jab tak Android app rebuild na ho — isiliye
-   `STOREAPP_PACKAGE` / `VITE_STOREAPP_PACKAGE` abhi `com.gothwad.store` hai.)
-6. **Old → new 301:** Cloudflare zone → **Rules → Redirect Rules** → *Create rule*,
-   chaaro ke liye (example): `Hostname equals store.gothwadtech.com` →
-   `https://kiwistore.gothwadtech.com${http.request.uri.path}` · 301 · query preserve.
-   Isse purane bookmarks aur Google links naye domains par aa jayenge.
-7. Ab Pages se purane 4 custom domains **remove** karo aur Worker se purane 4 routes.
-8. Google Search Console: naye domains add karo (+ "Change of address"). Canonical/og
-   tags naye domains ke saath build hote hain.
-
-## Step 6 — Future me naam/domain badalna ho (code touch kiye bina)
+## 5. Future me naam/domain badalna ho (code touch kiye bina)
 
 | Kya badalna hai | Pages (Environment variables) | Worker (Variables / `wrangler.toml`) |
 |-----------------|------------------------------|--------------------------------------|
@@ -136,22 +57,8 @@ se confirm kar lena). Yeh step kiye bina sign-in par `redirect_uri not allowed` 
 | Ek site ka subdomain | `VITE_CONSOLE_HOST` (etc.) | `CONSOLE_HOST` (etc.) |
 | Ek site ka poora URL (dusra zone) | `VITE_CONSOLE_URL` (etc.) | `CONSOLE_URL` (etc.) |
 | Store Android app ka package | `VITE_STOREAPP_PACKAGE` | `STOREAPP_PACKAGE` |
-| Accounts ka URL/client_id | `VITE_ACCOUNTS_SIGNIN_URL`, `VITE_OAUTH_CLIENT_ID` | `AUTH_SIGNIN_URL`, `AUTH_HUB_URL`, `OAUTH_CLIENT_ID` |
-
-Uske baad zaroori dashboard kaam: Pages/Worker par naya custom domain + `…/api/*`
-route, aur Accounts me redirect URI. Bas — code change nahi.
+| Accounts ka URL/client_id | `VITE_ACCOUNTS_SIGNIN_URL`, `VITE_ACCOUNTS_API_URL`, `VITE_OAUTH_CLIENT_ID` | `AUTH_SIGNIN_URL`, `AUTH_HUB_URL`, `OAUTH_CLIENT_ID` |
 
 Defaults sirf **`shared/brand.ts`** me hain; browser (`src/lib/config.ts`), build
 (`vite.config.ts` → `index.html` tokens + `manifest.json`) aur Worker
-(`worker/src/index.ts`) teeno wahi se padhte hain. `tests/brand-config.test.mjs`
-fail ho jata hai agar koi production URL ya brand string dobara hardcode ho jaye.
-
-## Troubleshooting
-
-| Symptom | Wajah |
-|---------|-------|
-| `/api/...` par 404 | Worker route missing/typo (Step 2) |
-| Browser me CORS error | Worker `*_HOST`/`APP_DOMAIN` vars theek nahi, ya `ALLOWED_ORIGINS` |
-| `redirect_uri not allowed` / `invalid_client` | Accounts row (Step 4) update nahi hui |
-| Site purana naam dikha rahi hai | Pages env var set hai ya browser/PWA cache — hard refresh + PWA re-add |
-| Preview (`*.pages.dev`) par demo mode dikh raha hai | Expected: demo sirf non-production hosts par chalta hai |
+(`worker/src/index.ts`) teeno wahi se padhte hain.

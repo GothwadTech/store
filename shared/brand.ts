@@ -41,7 +41,7 @@ export const BRAND_DEFAULTS = {
   ecosystemName: 'Gothwad',
   /** Store ki apni Android app ka package (APK wahi rahega jab tak rebuild na ho). */
   storeappPackage: 'com.gothwad.store',
-  accountsApiUrl: 'https://accounts.gothwadtech.com/api',
+  accountsApiUrl: 'https://api.gothwadtech.com',
   accountsSignInUrl: 'https://accounts.gothwadtech.com',
   oauthClientId: 'kiwi-store',
   apiBase: '/api',
@@ -59,6 +59,7 @@ export interface Brand {
   accountsHost: string;
   oauthClientId: string;
   apiBase: string;
+  storePublicUrl: string;
   siteHosts: Record<SiteMode, string>;
   siteUrls: Record<SiteMode, string>;
 }
@@ -71,14 +72,14 @@ const ENV_KEYS = {
   ecosystemName: ['ECOSYSTEM_NAME'],
   storeappPackage: ['STOREAPP_PACKAGE'],
   accountsName: ['ACCOUNTS_NAME'],
-  accountsApiUrl: ['ACCOUNTS_API_URL', 'GOTHWAD_AUTH_URL'],
-  accountsSignInUrl: ['ACCOUNTS_SIGNIN_URL', 'GOTHWAD_SIGNIN_URL', 'AUTH_SIGNIN_URL'],
+  accountsApiUrl: ['ACCOUNTS_API_URL', 'AUTH_HUB_URL', 'GOTHWAD_AUTH_URL'],
+  accountsSignInUrl: ['ACCOUNTS_SIGNIN_URL', 'ACCOUNTS_WEB_URL', 'GOTHWAD_SIGNIN_URL', 'AUTH_SIGNIN_URL'],
   oauthClientId: ['OAUTH_CLIENT_ID', 'GOTHWAD_CLIENT_ID'],
   apiBase: ['API_BASE'],
 } as const;
 
 const SITE_ENV_KEYS: Record<SiteMode, { host: string[]; url: string[] }> = {
-  store: { host: ['STORE_HOST'], url: ['STORE_URL'] },
+  store: { host: ['STORE_HOST'], url: ['STORE_URL', 'STORE_PUBLIC_URL'] },
   console: { host: ['CONSOLE_HOST'], url: ['CONSOLE_URL'] },
   admin: { host: ['ADMIN_HOST'], url: ['ADMIN_URL'] },
   storeapp: { host: ['STOREAPP_HOST'], url: ['STOREAPP_URL'] },
@@ -141,6 +142,7 @@ export function resolveBrand(rawEnv: Record<string, unknown> = {}, opts: { prefi
     accountsHost: hostOf(accountsSignInUrl) ?? appDomain,
     oauthClientId: str(ENV_KEYS.oauthClientId, BRAND_DEFAULTS.oauthClientId),
     apiBase: str(ENV_KEYS.apiBase, BRAND_DEFAULTS.apiBase),
+    storePublicUrl: siteUrls.store,
     siteHosts,
     siteUrls,
   };

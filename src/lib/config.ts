@@ -26,6 +26,7 @@ export const ECOSYSTEM_NAME = BRAND.ecosystemName;
 export const ACCOUNTS_NAME = BRAND.accountsName;
 export const ACCOUNTS_HOST = BRAND.accountsHost;
 export const STOREAPP_PACKAGE = BRAND.storeappPackage;
+export const STORE_PUBLIC_URL = BRAND.storePublicUrl;
 
 export const AUTH_BASE = BRAND.accountsApiUrl;
 export const AUTH_SIGNIN_URL = BRAND.accountsSignInUrl;
@@ -41,7 +42,7 @@ function isSiteMode(value: string | null): value is SiteMode {
   return SITE_MODES.some((m) => m.id === value);
 }
 
-/** Kaunsi site chal rahi hai - configured site hosts se. Preview/local par ?mode= se switch. */
+/** Kaunsi site chal rahi hai - configured site hosts se. Preview/local par ?mode= ya ?surface= se switch. */
 export function detectMode(): SiteMode {
   const host = normalizeHost(window.location.hostname);
   const fromHost = modeForHost(host, BRAND);
@@ -49,7 +50,9 @@ export function detectMode(): SiteMode {
   // Never consult local preview settings on a production hostname.
   if (isBrandHost(host, BRAND.appDomain)) return 'store';
   // Local / Cloudflare preview (*.e2b.app, localhost) - query ya saved choice
-  const q = new URLSearchParams(window.location.search).get('mode');
+  const params = new URLSearchParams(window.location.search);
+  const q = params.get('mode') ?? params.get('surface');
+  if (q === 'app') return 'storeapp';
   if (isSiteMode(q)) return q;
   try {
     const saved = localStorage.getItem(SITE_MODE_STORAGE_KEY);

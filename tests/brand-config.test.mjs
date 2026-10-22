@@ -32,6 +32,8 @@ test('default brand is Kiwi Store on the kiwi* hostnames', () => {
   assert.equal(brand.appName, 'Kiwi Store');
   assert.equal(brand.shortName, 'Kiwi');
   assert.equal(brand.oauthClientId, 'kiwi-store');
+  assert.equal(brand.accountsApiUrl, 'https://api.gothwadtech.com');
+  assert.equal(brand.accountsSignInUrl, 'https://accounts.gothwadtech.com');
   assert.deepEqual(brand.siteUrls, {
     store: 'https://kiwistore.gothwadtech.com',
     console: 'https://kiwiconsole.gothwadtech.com',
@@ -63,13 +65,14 @@ test('worker env (no VITE_ prefix) resolves the same four sites', () => {
       ADMIN_HOST: 'kiwiadmin',
       STOREAPP_HOST: 'kiwiapp',
       AUTH_SIGNIN_URL: 'https://accounts.gothwadtech.com',
+      AUTH_HUB_URL: 'https://api.gothwadtech.com',
       OAUTH_CLIENT_ID: 'kiwi-store',
-      SUPABASE_URL: 'https://db.test',
     },
     { prefix: '' },
   );
   assert.equal(brand.siteUrls.console, 'https://kiwiconsole.gothwadtech.com');
   assert.equal(brand.accountsHost, 'accounts.gothwadtech.com');
+  assert.equal(brand.accountsApiUrl, 'https://api.gothwadtech.com');
   assert.equal(brand.oauthClientId, 'kiwi-store');
 });
 

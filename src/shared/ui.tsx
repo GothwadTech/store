@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { LogOut, Star } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Star } from 'lucide-react';
 import type { StoreApp } from '../types';
 import { formatCount } from '../lib/storage';
 import { CATEGORY_LABELS } from '../data/categories';
-import { startGothwadSignIn } from '../lib/auth';
+import { handleOAuthCallback, startGothwadSignIn } from '../lib/auth';
 import { ACCOUNTS_HOST, APP_SHORT_NAME } from '../lib/config';
 import { useApp } from '../lib/AppContext';
+export { AccountMenu } from './AccountMenu';
 
 /** Chhoti helper - conditional class names jodne ke liye. */
 export const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ');
@@ -289,41 +290,22 @@ export function useToast(timeout = 4500) {
   return { show, node };
 }
 
-// ── Account menu (avatar → profile info + sign out) ───────────────────
-export function AccountMenu({ size = 36 }: { size?: number }) {
-  const { user, signOut } = useApp();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+// ── OAuth Callback view ───────────────────────────────────────────────
+export function AuthCallbackView({ onDone }: { onDone: () => void }) {
+  const { setUser } = useApp();
+  const [msg, setMsg] = useState('Returning from Gothwad Accounts…');
   useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', onClick);
-    window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('mousedown', onClick); window.removeEventListener('keydown', onKey); };
-  }, [open]);
-  if (!user) return null;
-  return (
-    <div className="relative shrink-0" ref={ref}>
-      <button onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} aria-label="Account menu"
-        className="grid place-items-center rounded-full ring-2 ring-white/10 transition hover:ring-emerald-400/50"
-        style={{ width: size, height: size }}>
-        <Avatar name={user.name} size={size} />
-      </button>
-      {open && (
-        <div role="menu" className="fade-up absolute right-0 top-[calc(100%+0.5rem)] z-50 w-64 overflow-hidden rounded-xl border border-white/10 bg-[#262626] shadow-2xl shadow-black/60">
-          <div className="border-b border-white/[0.06] px-4 py-3">
-            <p className="truncate text-sm font-semibold text-white">{user.name}</p>
-            <p className="truncate text-xs text-neutral-500">@{user.username}</p>
-            <p className="truncate text-xs text-neutral-500">{user.email}</p>
-          </div>
-          <button onClick={signOut} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm text-neutral-300 transition hover:bg-white/[0.05] hover:text-white">
-            <LogOut size={15} /> Sign out
-          </button>
-        </div>
-      )}
-    </div>
-  );
+    void handleOAuthCallback().then((r) => {
+      if ('user' in r) {
+        setUser(r.user);
+        setMsg('Signed in! Opening dashboard…');
+        window.setTimeout(onDone, 600);
+      } else {
+        setMsg(`We could not sign you in (${r.error}).`);
+      }
+    });
+  }, [onDone, setUser]);
+  return <main className="mx-auto max-w-md px-4 py-24 text-center text-neutral-300">{msg}</main>;
 }
 
 // ── Tabs (Console/Admin/App detail) ───────────────────────────────────
