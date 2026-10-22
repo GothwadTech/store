@@ -231,7 +231,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [isLocalDemo, patch, setUser]);
 
   const signOutSlot = useCallback(async (slotId: string) => {
-    await authSignOut(slotId);
+    const trimmed = typeof slotId === 'string' ? slotId.trim() : '';
+    if (!trimmed) return;
+    await authSignOut(trimmed);
     await hydrateFromBackend();
   }, [hydrateFromBackend]);
 

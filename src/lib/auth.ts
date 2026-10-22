@@ -9,8 +9,10 @@ import {
   detectMode,
   isProductionHostCheck,
 } from './config';
-import { getAuthuserFromLocation } from './router';
+import { getAuthuserFromLocation, resolveSignOutSlotId } from './authuser';
 import type { AccountSlotItem, GothwadUser } from '../types';
+
+export { resolveSignOutSlotId };
 
 let memoryAccessToken: string | null = null;
 let selectedAuthuser: number | null = null;
@@ -243,11 +245,22 @@ export async function fetchMe(): Promise<GothwadUser | null> {
   return direct?.user ?? null;
 }
 
+export async function signOutAccountSlot(
+  slotOrAccount: string | { id?: string; slot?: string } | null | undefined,
+  targetAccount?: { id?: string; slot?: string } | null,
+): Promise<boolean> {
+  const slotId = resolveSignOutSlotId(slotOrAccount, targetAccount);
+  if (!slotId) return false;
+  await signOut(slotId);
+  return true;
+}
+
 export async function signOut(slotId?: string): Promise<void> {
-  const path = slotId
-    ? `/auth/accounts/${encodeURIComponent(slotId)}/signout`
+  const normalizedSlot = typeof slotId === 'string' ? slotId.trim() : '';
+  const path = normalizedSlot
+    ? `/auth/accounts/${encodeURIComponent(normalizedSlot)}/signout`
     : '/auth/signout';
-  const payload = JSON.stringify(slotId ? { id: slotId } : {});
+  const payload = JSON.stringify(normalizedSlot ? { id: normalizedSlot } : {});
   const hdrs = { 'Content-Type': 'application/json', ...authHeaders() };
   try {
     const r = await fetch(`${API_BASE}${path}`, {
@@ -269,7 +282,7 @@ export async function signOut(slotId?: string): Promise<void> {
       /* ignore */
     }
   }
-  if (!slotId) {
+  if (!normalizedSlot) {
     memoryAccessToken = null;
   }
 }

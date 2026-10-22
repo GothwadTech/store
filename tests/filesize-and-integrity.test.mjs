@@ -42,6 +42,11 @@ test('every code, SQL, test, and markdown file in the repository is <= 500 lines
   assert.deepEqual(violations, [], `Files exceeding 500 lines:\n${violations.join('\n')}`);
 });
 
+test('package.json pins TypeScript 5.8.x so tsc binary is always available in npm ci', async () => {
+  const pkg = JSON.parse(await readFile(join(rootDir, 'package.json'), 'utf8'));
+  assert.match(String(pkg.devDependencies?.typescript ?? ''), /^\^5\.8\./);
+});
+
 test('worker/wrangler.toml wires active routes for all 4 domains, exact D1 store database_id, keep_vars = true, and zero R2 buckets', async () => {
   const wrangler = await readFile(join(rootDir, 'worker/wrangler.toml'), 'utf8');
   assert.match(wrangler, /\[\[d1_databases\]\]/);
@@ -105,11 +110,14 @@ test('web auth uses direct first-party /signin?next=, silent Accounts SSO fallba
   const fallbackSource = await readFile(join(rootDir, 'src/shared/gothwadAccountMenuFallback.ts'), 'utf8');
 
   assert.doesNotMatch(authSource, /\/oauth\/authorize/);
+  assert.doesNotMatch(authSource, /from '\.\/router'/);
   assert.match(authSource, /\/signin/);
   assert.match(authSource, /\/widget\/account-menu\.js/);
   assert.match(authSource, /\/api\/auth\/me/);
   assert.match(apiSource, /fetchDirectAccountsSession/);
   assert.match(menuSource, /ensureGothwadAccountMenu/);
+  assert.match(menuSource, /resolveSignOutSlotId/);
+  assert.match(menuSource, /extraAccountCount > 0/);
   assert.match(fallbackSource, /GothwadAccountMenu/);
 
   const srcFiles = await walkFiles(join(rootDir, 'src'));
@@ -118,8 +126,14 @@ test('web auth uses direct first-party /signin?next=, silent Accounts SSO fallba
     assert.doesNotMatch(content, /Sign in with Gothwad/i, `Found third-party Sign in with Gothwad copy in ${relative(rootDir, file)}`);
   }
 
-  // Verify direct browser silent SSO normalization against mocked /api/auth/me response
-  const { normalizeClientUser, normalizeClientAccounts } = await importTs('src/lib/auth.ts');
+  // Verify direct browser silent SSO normalization + per-slot signout contract
+  const {
+    normalizeClientUser,
+    normalizeClientAccounts,
+    resolveSignOutSlotId,
+    signOutAccountSlot,
+  } = await importTs('src/lib/auth.ts');
+
   const user = normalizeClientUser({
     id: 'u-1',
     username: 'Pawan',
@@ -143,7 +157,27 @@ test('web auth uses direct first-party /signin?next=, silent Accounts SSO fallba
   assert.equal(slots[0].active, false);
   assert.equal(slots[1].active, true);
   assert.equal(slots[1].authuser, 1);
-  assert.ok(t);
+
+  // Verify onSignOutAccount("b") resolves "b" from primitive string OR account object,
+  // calls /api/auth/accounts/b/signout, and NEVER calls /api/auth/signout.
+  assert.equal(resolveSignOutSlotId('b'), 'b');
+  assert.equal(resolveSignOutSlotId({ id: 'b' }), 'b');
+  assert.equal(resolveSignOutSlotId(null, { id: 'slot-2' }), 'slot-2');
+  assert.equal(resolveSignOutSlotId(undefined), null);
+
+  const calledUrls = [];
+  t.mock.method(globalThis, 'fetch', async (input) => {
+    calledUrls.push(String(input));
+    return Response.json({ ok: true });
+  });
+
+  const signedOutB = await signOutAccountSlot('b');
+  assert.equal(signedOutB, true);
+  assert.deepEqual(calledUrls, ['/api/auth/accounts/b/signout']);
+
+  const signedOutEmpty = await signOutAccountSlot(undefined);
+  assert.equal(signedOutEmpty, false);
+  assert.deepEqual(calledUrls, ['/api/auth/accounts/b/signout']);
 });
 
 test('all code, comments, SQL, and markdown documentation are written in 100% pure English', async () => {
