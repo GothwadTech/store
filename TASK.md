@@ -1,42 +1,41 @@
-# 📋 TASK.md — Kiwi Store live status
+# ✅ TASK TRACKER — Kiwi Store D1, F-Droid & Universal SSO
 
-**Last updated:** 2026-10-22 (100% Zero-Card Cloudflare D1 + D1 BLOB Edge Cache CDN + Multi-Account SSO complete) · New session? Pehle [`HANDOVER.md`](HANDOVER.md) padho · Plan: [`PLAN.md`](PLAN.md) · Deploy: [`docs/SETUP.md`](docs/SETUP.md)
+## 1. Completed Milestones
 
-## ✅ Session 4 (2026-10-22) — 100% Zero-Card Cloudflare D1 + Edge Cache Image CDN + Multi-Account SSO
+- [x] **100% Zero-Card Cloudflare D1 Database Migration (`store`)**:
+  - Replaced all legacy Supabase/PostgREST code with native Cloudflare D1 (`binding = "DB"`, `database_name = "store"`, `database_id = "a3dc3e71-cf89-4e0a-89d1-693fcf6f227a"`, `keep_vars = true`).
+  - Authored pure idempotent SQLite migrations in `sql/00_d1_console_bootstrap.sql` (zero comments, zero `PRAGMA` statements) and `sql/01_store_schema.sql` covering all 13 tables, 12 categories, and 5 official Gothwad ecosystem apps.
+  - Built auto-bootstrapping `ensureSchema(env)` in `worker/src/db.ts` and a real `node:sqlite` (`DatabaseSync`) test harness in `tools/local-d1.mjs`.
 
-- [x] **Supabase & ImgBB poori tarah hataye (Zero-Card / Zero-R2):**
-  - Cloudflare D1 (`database_name = "store"`, `database_id = "a3dc3e71-cf89-4e0a-89d1-693fcf6f227a"`, `binding = "DB"`, `keep_vars = true`) `worker/wrangler.toml` me wired.
-  - Legacy Postgres `sql/01_StoreSchema.sql` delete karke D1 SQLite migrations banaye:
-    - `sql/00_d1_console_bootstrap.sql` (100% comment-free, `PRAGMA`-free idempotent SQL — Cloudflare D1 Console paste ke liye).
-    - `sql/01_store_schema.sql` (13 tables + indexes + 12 categories + 5 official Gothwad ecosystem apps seed).
-- [x] **D1 `store_images` BLOB + Cloudflare Edge Cache (`caches.default`) Image CDN:**
-  - Browser (`src/lib/imageUpload.ts`) PNG/JPG/WebP images ko Canvas se `≤ 380 KB` WebP me compress karta hai.
-  - Worker (`worker/src/routes/media.ts`) binary magic bytes (`RIFF..WEBP`, `PNG`, `JPEG`) verify karta hai, SHA-256 se deduplicate karta hai, D1 `store_images` BLOB table me save karta hai, aur canonical absolute URL `https://store.gothwadtech.com/api/images/<id>?v=<sha256_prefix>` return karta hai.
-  - `GET /api/images/:id` Cloudflare `caches.default` (Edge Cache) + `Cache-Control: public, max-age=31536000, immutable` + `ETag` (`304 Not Modified`) ke saath serve hota hai.
-- [x] **Modular Worker Architecture (`<= 500` lines per file):**
-  - `worker/src/types.ts`, `worker/src/http.ts`, `worker/src/db.ts`, `worker/src/mappers.ts`, `worker/src/auth.ts`, `worker/src/apk.ts`, `worker/src/index.ts`
-  - `worker/src/routes/store-public.ts`, `worker/src/routes/store-user.ts`, `worker/src/routes/media.ts`, `worker/src/routes/console.ts`, `worker/src/routes/admin.ts`
-  - Supports both `/api/dev/*` and `/api/console/*` routes plus `/api/admin/overview`, `/api/admin/submissions/:id/(approve|reject)`, `/api/admin/apps/:id/(suspend|restore|unsuspend|feature)`, and `store_audit_log`.
-- [x] **Web & Android Auth + Multi-Account SSO Fixes:**
-  - `shared/brand.ts`: `accountsApiUrl = 'https://api.gothwadtech.com'` (fixes OAuth `/oauth/authorize` 404 when previously hitting `accounts.gothwadtech.com`).
-  - Web uses `.gothwadtech.com` HttpOnly SSO cookies (`credentials: 'include'`) + `/u/0..5` URL prefix (`src/lib/router.ts`) + `X-Gothwad-Authuser` header forwarding (`src/lib/api.ts`) + `AccountMenu` multi-account switcher (`src/shared/AccountMenu.tsx`).
-  - Worker (`worker/src/auth.ts`) forwards rotated `Set-Cookie` headers from Accounts `/api/auth/me` via `res.headers.getSetCookie()`, distinguishes Accounts `5xx`/network errors (`503`) from `401`/`403`, and supports `Authorization: Bearer <token>` for the Android `storeapp`.
-  - Zero OAuth tokens stored in `localStorage` or `sessionStorage`.
-  - Added `/auth/callback` route handling to `src/admin/AdminApp.tsx`.
-- [x] **Strict `<= 500` Lines Per File Enforcement & Automated Test Suite:**
-  - Split oversized frontend/worker/doc files into clean modules (`<= 500` lines each).
-  - Created `tools/local-d1.mjs` (`node:sqlite` `DatabaseSync` D1 adapter), `tests/d1-store-api.test.mjs`, and `tests/filesize-and-integrity.test.mjs`.
-  - Updated `tests/no-demo-catalog.test.mjs`, `tests/console-upload-guard.test.mjs`, and `tests/listing-save.test.mjs` to run against real SQLite (`LocalD1Database`).
+- [x] **100% Zero-Card D1 + Cloudflare Edge Cache Image CDN**:
+  - Removed ImgBB (`IMGBB_API_KEY`) completely.
+  - Client browser (`src/lib/imageUpload.ts`) compresses PNG/JPG/WebP images via Canvas to `<= 380 KB` WebP.
+  - Worker (`worker/src/routes/media.ts`) validates binary magic bytes (`RIFF..WEBP`, `PNG`, `JPEG`), deduplicates by SHA-256, stores bytes in D1 `store_images`, and serves `GET /api/images/:id` through Cloudflare `caches.default` with `Cache-Control: public, max-age=31536000, immutable` and `ETag` (`304 Not Modified`).
 
-## ✅ Previous Sessions Summary (Sessions 1–3)
+- [x] **F-Droid Open Source Catalog & Live Search Integration**:
+  - Added `worker/src/fdroid-data.ts` (curated popular open-source Android apps & games) and `worker/src/fdroid.ts` (Edge-cached F-Droid search API + live package version metadata resolver + icon proxy fallback).
+  - Wired `GET /api/store/fdroid?q=<query>`, `GET /api/store/apps?fdroid=1`, `GET /api/store/home`, `GET /api/store/charts`, `GET /api/store/search`, `GET /api/store/apps/fdroid:<pkg>`, `GET /api/download/fdroid:<pkg>`, and `GET /api/fdroid/icon/:pkg` while keeping default `GET /api/store/apps` pure D1 for Android `storeapp` compatibility.
+  - Added **F-Droid Open Source** rail, source filter pills (`All Sources`, `Kiwi Store`, `F-Droid Open Source`), live F-Droid search merge, and purple `F-Droid` badges on `StoreApp.tsx` and `StorePages.tsx`.
 
-- [x] 4-surface single SPA (`Store`, `Developer Console`, `Store Admin`, `StoreApp Landing`) with hostname auto-detection (`shared/brand.ts` + `src/lib/config.ts`).
-- [x] Synchronous production host gating (`gothwadtech.com` & `*.gothwadtech.com` never show demo fixtures or demo sign-in).
-- [x] Binary `AndroidManifest.xml` APK parser (`worker/src/apk.ts`) + GitHub `GothwadTech/storefiles` release uploader (`≤ 50 MB`).
-- [x] Responsive UI design system (`src/shared/ui.tsx`) verified by `npm run test:ui` across 8 mobile & desktop surfaces.
+- [x] **Automatic `.gothwadtech.com` Silent SSO & First-Party Sign-In**:
+  - Activated `routes = [...]` in `worker/wrangler.toml` for `kiwistore.gothwadtech.com/api/*`, `kiwiconsole.gothwadtech.com/api/*`, `kiwiadmin.gothwadtech.com/api/*`, and `kiwiapp.gothwadtech.com/api/*` (`zone_name = "gothwadtech.com"`).
+  - Added automatic direct browser silent SSO fallback (`fetchDirectAccountsSession()` -> `GET https://api.gothwadtech.com/api/auth/me` with `credentials: 'include'`) in `src/lib/auth.ts` and `src/lib/api.ts`.
+  - Replaced third-party web `/oauth/authorize` consent flows and `"Sign in with Gothwad"` labels with direct first-party `"Sign in"` (`https://accounts.gothwadtech.com/signin?next=<current_url>`), while preserving `Authorization: Bearer <token>` and `POST /api/auth/exchange` for the native Android `storeapp`.
 
-## 🔜 Next Owner Dashboard Steps (`docs/SETUP.md`)
+- [x] **Universal Google-Style Account Switcher (`window.GothwadAccountMenu`)**:
+  - Updated `src/shared/AccountMenu.tsx` and `src/shared/gothwadAccountMenuFallback.ts` to load `https://accounts.gothwadtech.com/widget/account-menu.js` (`window.GothwadAccountMenu.open(state, opts)`) with a resilient Shadow-DOM fallback for offline/local environments.
+  - Supports multi-account slot switching (`0..5`, `/u/0`..`/u/5`, `?authuser=N`, `X-Gothwad-Authuser`), per-slot sign-out, sign-out-all, and cross-surface quick actions (`Kiwi Store`, `Kiwi Console`, `Kiwi Admin`).
 
-- [ ] Run `sql/00_d1_console_bootstrap.sql` in Cloudflare D1 Console (`store`, `a3dc3e71-cf89-4e0a-89d1-693fcf6f227a`) or via `npx wrangler d1 execute store --remote --file=sql/01_store_schema.sql --config worker/wrangler.toml`.
-- [ ] Ensure `GITHUB_TOKEN` secret is set on Worker `store` for `GothwadTech/storefiles` APK uploads.
-- [ ] Deploy Worker (`npm run worker:deploy`) and verify `https://store.gothwadtech.com/api/health` returns `engine: "cloudflare-d1"` and `configured.d1: true`.
+- [x] **Strict Code Hygiene & `<= 500` Lines Per File**:
+  - Every source, Worker, SQL, test, and documentation file is strictly `<= 500` lines and written in 100% pure English.
+
+---
+
+## 2. Verification Commands
+
+```bash
+npm run lint      # 0 errors (ESLint + TypeScript)
+npm test          # Unit + integration tests (D1 SQLite, F-Droid, Silent SSO, Account Menu, <= 500 lines)
+npm run build     # Vite production bundle
+npm run test:ui   # 8/8 JSDOM render smoke tests across Store, Console, Admin, and StoreApp
+```

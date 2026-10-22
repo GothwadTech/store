@@ -12,8 +12,8 @@ import {
 } from '../lib/config';
 
 /**
- * Store App site (kiwiapp.*) - sirf Kiwi Store Android app ko download karne ka page.
- * Domain/name shared/brand.ts se aate hain - yahan kuch hardcode nahi.
+ * Store App landing page (kiwiapp.*) — dedicated download page for the native Android client.
+ * Brand and domain names come from shared/brand.ts rather than hardcoded strings.
  */
 export default function StoreAppLanding() {
   const { apps, liveReleaseOf } = useApp();
@@ -78,13 +78,13 @@ export default function StoreAppLanding() {
 
               <ul className="mt-8 space-y-3 text-sm text-neutral-300">
                 <li className="flex gap-2.5"><ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-300" /> Every app is manually reviewed before it goes live</li>
-                <li className="flex gap-2.5"><BadgeCheck size={17} className="mt-0.5 shrink-0 text-emerald-300" /> Sign in with {ECOSYSTEM_NAME} — the same account you use for Mail and Drive</li>
+                <li className="flex gap-2.5"><BadgeCheck size={17} className="mt-0.5 shrink-0 text-emerald-300" /> One {ECOSYSTEM_NAME} Account across Store, Mail, and Drive</li>
                 <li className="flex gap-2.5"><Smartphone size={17} className="mt-0.5 shrink-0 text-emerald-300" /> Works on phones, tablets, and Android TV</li>
               </ul>
 
               <div className="mt-9 flex items-center gap-4 rounded-3xl border border-white/[0.08] bg-white/[0.03] p-4">
                 <div className="grid h-24 w-24 shrink-0 place-items-center rounded-2xl bg-white p-1.5">
-                  {/* QR code is site ke apne configured URL ka banta hai (SITE_URLS.storeapp) */}
+                  {/* QR code points to the configured Store App URL (SITE_URLS.storeapp) */}
                   <img src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=${encodeURIComponent(SITE_URLS.storeapp)}`}
                     alt="QR code - scan to open this page on your phone" className="h-full w-full rounded-lg" loading="lazy" width={120} height={120} />
                 </div>

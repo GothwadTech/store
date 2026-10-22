@@ -31,9 +31,34 @@ export function Logo({ subtitle, compact = false }: { subtitle: string; compact?
   );
 }
 
+export function isFdroidApp(app: StoreApp): boolean {
+  return app.id.startsWith('fdroid:') || app.source?.toLowerCase() === 'f-droid';
+}
+
+export function SourceBadge({ app }: { app: StoreApp }) {
+  if (!isFdroidApp(app)) return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-teal-500/15 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-teal-300 ring-1 ring-teal-400/25">
+      F-Droid • FOSS
+    </span>
+  );
+}
+
 export function AppIcon({ app, size = 56, rounded = 'rounded-2xl' }: { app: StoreApp; size?: number; rounded?: string }) {
-  if (app.iconUrl) {
-    return <img src={app.iconUrl} alt={app.name} width={size} height={size} className={`${rounded} shrink-0 object-cover`} style={{ width: size, height: size }} loading="lazy" />;
+  const [broken, setBroken] = useState(false);
+  if (app.iconUrl && !broken) {
+    return (
+      <img
+        src={app.iconUrl}
+        alt={app.name}
+        width={size}
+        height={size}
+        onError={() => setBroken(true)}
+        className={`${rounded} shrink-0 object-cover`}
+        style={{ width: size, height: size }}
+        loading="lazy"
+      />
+    );
   }
   return (
     <span className={`grid shrink-0 place-items-center ${rounded} font-display font-bold text-white`} style={{ width: size, height: size, background: app.iconColor, fontSize: size * 0.42 }}>
@@ -70,7 +95,7 @@ export function categoryName(slug: string): string {
   return CATEGORY_LABELS[slug] ?? slug;
 }
 
-// ════════════════ DESIGN SYSTEM (chaaro sites yahi use karti hain) ════════════════
+// ════════════════ DESIGN SYSTEM (shared across all four surfaces) ════════════════
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'quiet';
 type ButtonSize = 'sm' | 'md' | 'lg';
@@ -94,7 +119,7 @@ const BUTTON_SIZES: Record<ButtonSize, string> = {
 export const BUTTON_BASE =
   'inline-flex items-center justify-center whitespace-nowrap rounded-lg font-medium transition duration-150 disabled:cursor-not-allowed disabled:opacity-45';
 
-/** Purane call sites (Console/Admin) inhi class strings ko use karte hain. */
+/** Legacy Console and Admin form controls share these class string presets. */
 export const btnPrimary = cx(BUTTON_BASE, BUTTON_VARIANTS.primary, BUTTON_SIZES.sm, 'rounded-lg');
 export const btnGhost = cx(BUTTON_BASE, BUTTON_VARIANTS.secondary, BUTTON_SIZES.sm);
 export const btnDanger = cx(BUTTON_BASE, BUTTON_VARIANTS.danger, BUTTON_SIZES.sm);
@@ -387,6 +412,7 @@ export function SiteFooter({ note, children }: { note?: string; children?: React
 }
 
 export function AppCard({ app, onOpen }: { app: StoreApp; onOpen: (a: StoreApp) => void }) {
+  const fdroid = isFdroidApp(app);
   return (
     <button onClick={() => onOpen(app)} className="group w-[112px] shrink-0 text-left sm:w-[136px]">
       <span className="block overflow-hidden rounded-[22%] shadow-lg shadow-black/30 ring-1 ring-white/10 transition duration-200 group-hover:-translate-y-0.5 group-hover:ring-emerald-400/40">
@@ -395,22 +421,30 @@ export function AppCard({ app, onOpen }: { app: StoreApp; onOpen: (a: StoreApp) 
       <span className="mt-2 line-clamp-1 block text-[13px] font-medium text-neutral-100">{app.name}</span>
       <span className="line-clamp-1 block text-[11px] text-neutral-400">{categoryName(app.category)}</span>
       <span className="mt-0.5 flex items-center gap-1 text-[11px] text-neutral-400">
-        {app.ratingAvg.toFixed(1)} <Star size={10} className="fill-neutral-400 text-neutral-400" /> · {formatCount(app.downloadsCount)}
+        {fdroid ? <span className="font-medium text-teal-300">F-Droid • FOSS</span> : <>{app.ratingAvg.toFixed(1)} <Star size={10} className="fill-neutral-400 text-neutral-400" /> · {formatCount(app.downloadsCount)}</>}
       </span>
     </button>
   );
 }
 
 export function AppRow({ app, rank, onOpen }: { app: StoreApp; rank?: number; onOpen: (a: StoreApp) => void }) {
+  const fdroid = isFdroidApp(app);
   return (
     <button onClick={() => onOpen(app)} className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/[0.05]">
       {rank !== undefined && <span className="w-6 shrink-0 text-center font-display text-lg font-bold text-neutral-500 tabular-nums">{rank}</span>}
       <AppIcon app={app} size={48} rounded="rounded-xl" />
       <span className="min-w-0 flex-1">
-        <span className="line-clamp-1 block text-sm font-medium text-neutral-100">{app.name}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="line-clamp-1 text-sm font-medium text-neutral-100">{app.name}</span>
+          {fdroid && <span className="shrink-0 rounded-full bg-teal-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-teal-300 ring-1 ring-teal-400/25">F-Droid</span>}
+        </span>
         <span className="line-clamp-1 block text-xs text-neutral-400">{app.shortDesc || categoryName(app.category)}</span>
         <span className="mt-0.5 flex items-center gap-1 text-[11px] text-neutral-400">
-          {app.ratingAvg.toFixed(1)} <Star size={10} className="fill-neutral-400 text-neutral-400" /> · {formatCount(app.downloadsCount)} downloads
+          {fdroid ? (
+            <span>{app.developerName} · {app.license || 'Open Source'}</span>
+          ) : (
+            <>{app.ratingAvg.toFixed(1)} <Star size={10} className="fill-neutral-400 text-neutral-400" /> · {formatCount(app.downloadsCount)} downloads</>
+          )}
         </span>
       </span>
       <span className="shrink-0 text-neutral-600 transition group-hover:text-neutral-400" aria-hidden="true">
@@ -438,7 +472,7 @@ export function SignInPrompt({ what }: { what: string }) {
     <div className="mx-auto max-w-md px-4 py-16 text-center">
       <div className="fade-up rounded-3xl border border-white/10 bg-[#262626] p-8 shadow-2xl shadow-black/40">
         <div className="flex justify-center"><Logo subtitle={what} /></div>
-        <h1 className="mt-6 font-display text-2xl font-semibold tracking-tight text-white">Sign in with your Gothwad Account</h1>
+        <h1 className="mt-6 font-display text-2xl font-semibold tracking-tight text-white">Sign in</h1>
         <p className="mt-2 text-sm leading-relaxed text-neutral-400">
           One Gothwad Account for Mail, Drive, Store, and more. Sign in to continue to {what}.
         </p>
@@ -446,7 +480,7 @@ export function SignInPrompt({ what }: { what: string }) {
           onClick={() => { void startGothwadSignIn(); }}
           className="mt-6 w-full rounded-lg bg-emerald-500 px-5 py-3 text-sm font-semibold text-[#08130e] shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400"
         >
-          Sign in with Gothwad
+          Sign in
         </button>
         {demoModeAvailable && (
           <button onClick={signInDemo} className="mt-2.5 w-full rounded-lg border border-white/15 px-5 py-2.5 text-sm font-medium text-neutral-200 transition hover:bg-white/5">

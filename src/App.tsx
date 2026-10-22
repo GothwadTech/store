@@ -17,7 +17,7 @@ const AdminApp = lazy(() => import('./admin/AdminApp'));
 const StoreAppLanding = lazy(() => import('./landing/StoreAppLanding'));
 
 function DevModeSwitcher({ mode }: { mode: SiteMode }) {
-  // Sirf preview/local par: 4 sites ek hi Pages preview me ghumane ke liye.
+  // Local and preview only: switch between all 4 surfaces inside a single preview deployment.
   if (isProductionHostCheck()) return null;
   return (
     <div className="fixed bottom-20 left-1/2 z-[60] flex -translate-x-1/2 gap-1 rounded-full border border-white/15 bg-black/80 p-1 shadow-2xl backdrop-blur-xl lg:bottom-4">
@@ -45,7 +45,7 @@ function setMeta(attribute: 'name' | 'property', key: string, content: string) {
 }
 
 function applySeoMetadata(mode: SiteMode) {
-  // Title/description app name se derive hote hain (shared/brand.ts) - hardcode nahi.
+  // Titles and descriptions derive from the configured brand (shared/brand.ts).
   const { title, description } = seoFor(mode, BRAND);
   const canonicalUrl = new URL(window.location.pathname || '/', `${SITE_URLS[mode]}/`).toString();
   const imageUrl = `${SITE_URLS.store}/assets/icon-512.png`;

@@ -2,7 +2,12 @@
 // All frontend ↔ backend communication goes through /api/* on the Cloudflare
 // Worker backed by Cloudflare D1 (`store`).
 import { API_BASE } from './config';
-import { authHeaders } from './auth';
+import {
+  accountsApiOrigin,
+  authHeaders,
+  fetchDirectAccountsSession,
+  manageAccountUrl,
+} from './auth';
 import type {
   AccountSlotItem,
   AppRelease,
@@ -30,12 +35,8 @@ export class ApiError extends Error {
 }
 
 const RETRYABLE_STATUS = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
-const sleep = (milliseconds: number) =>
-  new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
-
-function apiUrl(path: string): string {
-  return `${API_BASE}${path}`;
-}
+const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+const apiUrl = (path: string): string => `${API_BASE}${path}`;
 
 function parseError(status: number, data: unknown, fallback: string): ApiError {
   const body = (data ?? {}) as { error?: string; message?: string };
@@ -60,11 +61,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init.headers ?? {}) },
     });
   } catch {
-    throw new ApiError(
-      0,
-      'network',
-      'Could not reach the Store API. Check your connection and try again.',
-    );
+    throw new ApiError(0, 'network', 'Could not reach the Store API. Check your connection and try again.');
   }
   const data = await responseData(res);
   if (!res.ok) throw parseError(res.status, data, `Request failed (${res.status})`);
@@ -77,10 +74,7 @@ interface XhrUploadOptions {
   signal?: AbortSignal;
 }
 
-/**
- * XMLHttpRequest is deliberate here: fetch still does not expose request-body
- * progress in browsers. APK/image uploads show actual bytes sent.
- */
+/** XMLHttpRequest is used deliberately so APK and image uploads report byte progress. */
 function xhrJson(
   method: 'POST' | 'PUT',
   url: string,
@@ -90,11 +84,11 @@ function xhrJson(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let finished = false;
-    const finish = (callback: () => void) => {
+    const finish = (cb: () => void) => {
       if (finished) return;
       finished = true;
       options.signal?.removeEventListener('abort', abort);
-      callback();
+      cb();
     };
     const abort = () => {
       try {
@@ -111,9 +105,9 @@ function xhrJson(
     for (const [header, value] of Object.entries(authHeaders())) {
       xhr.setRequestHeader(header, value);
     }
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && event.total > 0) {
-        options.onProgress?.(Math.min(1, event.loaded / event.total));
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) {
+        options.onProgress?.(Math.min(1, e.loaded / e.total));
       }
     };
     xhr.onload = () => {
@@ -127,25 +121,9 @@ function xhrJson(
       else finish(() => reject(parseError(xhr.status, data, `Upload failed (${xhr.status})`)));
     };
     xhr.onerror = () =>
-      finish(() =>
-        reject(
-          new ApiError(
-            0,
-            'network',
-            'The upload lost its network connection. Please try again.',
-          ),
-        ),
-      );
+      finish(() => reject(new ApiError(0, 'network', 'The upload lost its network connection. Please try again.')));
     xhr.ontimeout = () =>
-      finish(() =>
-        reject(
-          new ApiError(
-            408,
-            'timeout',
-            'The upload took too long. Check your connection and try again.',
-          ),
-        ),
-      );
+      finish(() => reject(new ApiError(408, 'timeout', 'The upload took too long. Check your connection and try again.')));
     xhr.onabort = () => finish(() => reject(new ApiError(0, 'aborted', 'Upload cancelled.')));
     options.signal?.addEventListener('abort', abort, { once: true });
     xhr.send(body as XMLHttpRequestBodyInit | null);
@@ -164,9 +142,7 @@ async function retryUpload<T>(work: () => Promise<T>, attempts = 3): Promise<T> 
       await sleep(500 * (attempt + 1));
     }
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new ApiError(0, 'upload_failed', 'Upload failed.');
+  throw lastError instanceof Error ? lastError : new ApiError(0, 'upload_failed', 'Upload failed.');
 }
 
 export interface SessionInfo {
@@ -193,40 +169,75 @@ export async function fetchSession(): Promise<SessionInfo | null> {
       accountUrl?: string;
       configured?: { d1?: boolean; githubApk?: boolean };
     }>('/me');
-    if (!d.user) return null;
-    return {
-      user: d.user,
-      developer: d.developer ?? null,
-      isAdmin: !!d.isAdmin,
-      d1Configured: !!d.configured?.d1,
-      activeSlot: d.activeSlot ?? d.activeId ?? null,
-      authuser: typeof d.authuser === 'number' ? d.authuser : 0,
-      accounts: Array.isArray(d.accounts) ? d.accounts : [],
-      accountUrl: d.accountUrl,
-    };
+    if (d?.user) {
+      return {
+        user: d.user,
+        developer: d.developer ?? null,
+        isAdmin: !!d.isAdmin,
+        d1Configured: !!d.configured?.d1,
+        activeSlot: d.activeSlot ?? d.activeId ?? null,
+        authuser: typeof d.authuser === 'number' ? d.authuser : 0,
+        accounts: Array.isArray(d.accounts) ? d.accounts : [],
+        accountUrl: d.accountUrl,
+      };
+    }
   } catch {
-    return null;
+    /* Fall through to direct browser silent SSO check */
   }
+  const direct = await fetchDirectAccountsSession();
+  if (!direct?.user) return null;
+  return {
+    user: direct.user,
+    developer: null,
+    isAdmin: false,
+    d1Configured: false,
+    activeSlot: direct.activeSlot,
+    authuser: direct.authuser,
+    accounts: direct.accounts,
+    accountUrl: manageAccountUrl(direct.authuser),
+  };
 }
 
 export const authApi = {
-  accounts: () =>
-    request<{
-      authenticated: boolean;
-      activeId: string | null;
-      authuser: number;
-      accounts: AccountSlotItem[];
-    }>('/auth/accounts'),
-  switchAccount: (payload: { id?: string; authuser?: number }) =>
-    request<{ ok?: boolean; activeId?: string; authuser?: number }>('/auth/switch', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  signOutSlot: (slotId: string) =>
-    request<{ ok: boolean }>(`/auth/accounts/${encodeURIComponent(slotId)}/signout`, {
-      method: 'POST',
-      body: JSON.stringify({ id: slotId }),
-    }),
+  accounts: async () => {
+    try {
+      return await request<{ authenticated: boolean; activeId: string | null; authuser: number; accounts: AccountSlotItem[] }>('/auth/accounts');
+    } catch {
+      const direct = await fetchDirectAccountsSession();
+      return {
+        authenticated: Boolean(direct?.user),
+        activeId: direct?.activeSlot ?? null,
+        authuser: direct?.authuser ?? 0,
+        accounts: direct?.accounts ?? [],
+      };
+    }
+  },
+  switchAccount: async (payload: { id?: string; authuser?: number }) => {
+    try {
+      return await request<{ ok?: boolean; activeId?: string; authuser?: number }>('/auth/switch', { method: 'POST', body: JSON.stringify(payload) });
+    } catch {
+      const r = await fetch(`${accountsApiOrigin()}/api/auth/switch`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...authHeaders() },
+        body: JSON.stringify(payload),
+      });
+      return (await r.json().catch(() => ({}))) as { ok?: boolean; activeId?: string; authuser?: number };
+    }
+  },
+  signOutSlot: async (slotId: string) => {
+    try {
+      return await request<{ ok: boolean }>(`/auth/accounts/${encodeURIComponent(slotId)}/signout`, { method: 'POST', body: JSON.stringify({ id: slotId }) });
+    } catch {
+      await fetch(`${accountsApiOrigin()}/api/auth/accounts/${encodeURIComponent(slotId)}/signout`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ id: slotId }),
+      });
+      return { ok: true };
+    }
+  },
 };
 
 export type CatalogStatus = 'ready' | 'unconfigured' | 'unavailable';
@@ -246,11 +257,11 @@ interface CatalogResponse {
   source?: string;
 }
 
-/** Load live catalog records; never substitute local sample listings. */
+/** Load live catalog records (Kiwi Store D1 + F-Droid Open Source); never substitute local sample listings. */
 export async function fetchCatalog(): Promise<Catalog> {
   try {
     const [appsRes, catRes] = await Promise.all([
-      request<CatalogResponse>('/store/apps'),
+      request<CatalogResponse>('/store/apps?fdroid=1'),
       request<{ categories?: Category[]; source?: string }>('/store/categories'),
     ]);
     if (appsRes.source === 'unconfigured' || catRes.source === 'unconfigured') {
@@ -268,7 +279,30 @@ export async function fetchCatalog(): Promise<Catalog> {
   }
 }
 
-// ── User actions (login) ────────────────────────────────────────────
+export async function searchFdroid(query: string): Promise<{ apps: StoreApp[]; releases: AppRelease[] }> {
+  try {
+    const d = await request<CatalogResponse>(`/store/fdroid?q=${encodeURIComponent(query.trim())}`);
+    return { apps: d.apps ?? [], releases: d.releases ?? [] };
+  } catch {
+    return { apps: [], releases: [] };
+  }
+}
+
+export async function fetchAppDetail(idOrPkg: string): Promise<{
+  app: StoreApp;
+  screenshots: string[];
+  liveRelease: AppRelease | null;
+  releases: AppRelease[];
+  reviews: Review[];
+} | null> {
+  try {
+    return await request(`/store/apps/${encodeURIComponent(idOrPkg)}`);
+  } catch {
+    return null;
+  }
+}
+
+// ── User actions (signed-in) ────────────────────────────────────────
 export const userApi = {
   addReview: (appId: string, rating: number, body: string) =>
     request<{ review: Review }>(`/store/apps/${encodeURIComponent(appId)}/reviews`, {
@@ -303,25 +337,15 @@ export interface DevBundle {
 }
 
 export const devApi = {
-  register: (d: {
-    displayName: string;
-    orgName: string;
-    supportEmail: string;
-    website?: string;
-  }) => request<{ developer: Developer }>('/dev/register', { method: 'POST', body: JSON.stringify(d) }),
+  register: (d: { displayName: string; orgName: string; supportEmail: string; website?: string }) =>
+    request<{ developer: Developer }>('/dev/register', { method: 'POST', body: JSON.stringify(d) }),
   bundle: () => request<DevBundle>('/dev/apps'),
   createApp: (a: Pick<StoreApp, 'name' | 'packageName' | 'category' | 'kind'>) =>
     request<{ app: StoreApp }>('/dev/apps', { method: 'POST', body: JSON.stringify(a) }),
   updateApp: (id: string, patch: Partial<StoreApp>) =>
-    request<{ app: StoreApp }>(`/dev/apps/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    }),
+    request<{ app: StoreApp }>(`/dev/apps/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   setStatus: (id: string, status: 'unlisted' | 'published') =>
-    request<{ app: StoreApp }>(`/dev/apps/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    }),
+    request<{ app: StoreApp }>(`/dev/apps/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   createRelease: (appId: string, payload: unknown) =>
     request<{ release: AppRelease }>(`/dev/apps/${encodeURIComponent(appId)}/releases`, {
       method: 'POST',
@@ -346,12 +370,10 @@ export const devApi = {
     }>(`/dev/apps/${encodeURIComponent(appId)}/stats?days=${days}`),
 };
 
-// ── Admin ───────────────────────────────────────────────────────────
+// ── Admin moderation ────────────────────────────────────────────────
 export const adminApi = {
-  queue: () =>
-    request<{ submissions: Submission[]; apps: StoreApp[]; releases: AppRelease[] }>('/admin/queue'),
-  apps: () =>
-    request<{ apps: StoreApp[]; releases: AppRelease[]; submissions: Submission[] }>('/admin/apps'),
+  queue: () => request<{ submissions: Submission[]; apps: StoreApp[]; releases: AppRelease[] }>('/admin/queue'),
+  apps: () => request<{ apps: StoreApp[]; releases: AppRelease[]; submissions: Submission[] }>('/admin/apps'),
   reports: () => request<{ reports: ReportItem[] }>('/admin/reports'),
   decide: (submissionId: string, ok: boolean, note: string) =>
     request<{ submission: Submission }>(
@@ -359,15 +381,9 @@ export const adminApi = {
       { method: 'POST', body: JSON.stringify({ note }) },
     ),
   suspend: (appId: string) =>
-    request<{ app: StoreApp }>(`/admin/apps/${encodeURIComponent(appId)}/suspend`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }),
+    request<{ app: StoreApp }>(`/admin/apps/${encodeURIComponent(appId)}/suspend`, { method: 'POST', body: JSON.stringify({}) }),
   restore: (appId: string) =>
-    request<{ app: StoreApp }>(`/admin/apps/${encodeURIComponent(appId)}/restore`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }),
+    request<{ app: StoreApp }>(`/admin/apps/${encodeURIComponent(appId)}/restore`, { method: 'POST', body: JSON.stringify({}) }),
   resolveReport: (reportId: string, status: 'resolved' | 'dismissed') =>
     request<{ report: ReportItem }>(`/admin/reports/${encodeURIComponent(reportId)}/resolve`, {
       method: 'POST',
@@ -413,33 +429,27 @@ export async function uploadImage(
     form.append('image', image, fileName.replace(/\.[^.]+$/, '') + '.webp');
     const kind = callbacks.kind ?? callbacks.purpose;
     if (kind) form.append('kind', kind);
-    return xhrJson('POST', apiUrl('/uploads/image'), form, {
-      ...callbacks,
-      timeoutMs: 90_000,
-    }) as Promise<{ url?: string; error?: string; message?: string }>;
+    return xhrJson('POST', apiUrl('/uploads/image'), form, { ...callbacks, timeoutMs: 90_000 }) as Promise<{
+      url?: string;
+      error?: string;
+      message?: string;
+    }>;
   });
   if (!result?.url) {
-    throw new ApiError(
-      502,
-      result?.error ?? 'upload_failed',
-      result?.message ?? 'Image upload failed. Please try again.',
-    );
+    throw new ApiError(502, result?.error ?? 'upload_failed', result?.message ?? 'Image upload failed. Please try again.');
   }
   callbacks.onProgress?.(1);
   return result.url;
 }
 
-/** APK store kiye bina manifest auto-read (console form auto-fill). */
+/** Inspect binary APK manifest without saving the release yet (console form auto-fill). */
 export async function inspectApk(
   file: File,
   signal?: AbortSignal,
 ): Promise<{ manifest: ApkManifestInfo; sizeBytes: number; sha256: string }> {
   const form = new FormData();
   form.append('file', file, file.name);
-  const data = (await xhrJson('POST', apiUrl('/uploads/apk-inspect'), form, {
-    timeoutMs: 120_000,
-    signal,
-  })) as {
+  const data = (await xhrJson('POST', apiUrl('/uploads/apk-inspect'), form, { timeoutMs: 120_000, signal })) as {
     manifest?: ApkManifestInfo;
     sizeBytes?: number;
     sha256?: string;
@@ -447,23 +457,12 @@ export async function inspectApk(
     message?: string;
   };
   if (!data?.manifest) {
-    throw new ApiError(
-      502,
-      data?.error ?? 'inspect_failed',
-      data?.message ?? 'APK inspection failed',
-    );
+    throw new ApiError(502, data?.error ?? 'inspect_failed', data?.message ?? 'APK inspection failed');
   }
-  return {
-    manifest: data.manifest,
-    sizeBytes: data.sizeBytes ?? file.size,
-    sha256: data.sha256 ?? '',
-  };
+  return { manifest: data.manifest, sizeBytes: data.sizeBytes ?? file.size, sha256: data.sha256 ?? '' };
 }
 
-/**
- * APK upload flow: every supported APK goes through the Worker to GitHub
- * storefiles.
- */
+/** APK upload flow: every supported APK goes through the Worker to GitHub storefiles. */
 export async function uploadApk(
   file: File,
   app: { packageName: string },
@@ -476,17 +475,12 @@ export async function uploadApk(
     form.append('file', file, file.name);
     form.append('packageName', app.packageName);
     form.append('versionCode', String(versionCode));
-    return xhrJson('POST', apiUrl('/uploads/apk'), form, {
-      ...callbacks,
-      timeoutMs: 10 * 60_000,
-    }) as Promise<UploadedApk & { error?: string; message?: string }>;
+    return xhrJson('POST', apiUrl('/uploads/apk'), form, { ...callbacks, timeoutMs: 10 * 60_000 }) as Promise<
+      UploadedApk & { error?: string; message?: string }
+    >;
   }, 2);
   if (!result?.url) {
-    throw new ApiError(
-      502,
-      result?.error ?? 'upload_failed',
-      result?.message ?? 'APK upload failed. Please try again.',
-    );
+    throw new ApiError(502, result?.error ?? 'upload_failed', result?.message ?? 'APK upload failed. Please try again.');
   }
   callbacks.onProgress?.(1);
   return {

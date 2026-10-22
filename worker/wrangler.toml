@@ -1,13 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════
 # Kiwi Store API Worker — Cloudflare Workers + Cloudflare D1 (`store`)
 #
-# Routes (Custom Domain ya Zone Route):
-#   kiwistore.gothwadtech.com/api/*
-#   kiwiconsole.gothwadtech.com/api/*
-#   kiwiadmin.gothwadtech.com/api/*
-#   kiwiapp.gothwadtech.com/api/*
-#
-# Secrets (Dashboard ya `wrangler secret put` se set karein):
+# Secrets (set via Dashboard or `wrangler secret put`):
 #   wrangler secret put GITHUB_FILES_TOKEN
 # ═══════════════════════════════════════════════════════════════════
 
@@ -15,6 +9,13 @@ name = "store"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 keep_vars = true
+
+routes = [
+  { pattern = "kiwistore.gothwadtech.com/api/*", zone_name = "gothwadtech.com" },
+  { pattern = "kiwiconsole.gothwadtech.com/api/*", zone_name = "gothwadtech.com" },
+  { pattern = "kiwiadmin.gothwadtech.com/api/*", zone_name = "gothwadtech.com" },
+  { pattern = "kiwiapp.gothwadtech.com/api/*", zone_name = "gothwadtech.com" }
+]
 
 [[d1_databases]]
 binding = "DB"
@@ -39,7 +40,7 @@ ACCOUNTS_API_URL = "https://api.gothwadtech.com"
 AUTH_SIGNIN_URL = "https://accounts.gothwadtech.com"
 ACCOUNTS_WEB_URL = "https://accounts.gothwadtech.com"
 OAUTH_CLIENT_ID = "kiwi-store"
-ADMIN_USERNAMES = "pawan"
+ADMIN_USERNAMES = "pawan,pawangothwad"
 
 GITHUB_FILES_OWNER = "GothwadTech"
 GITHUB_FILES_REPO = "storefiles"

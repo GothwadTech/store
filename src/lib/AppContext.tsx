@@ -105,7 +105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const isLocalDemo = useCallback(() => demoAllowedRef.current && userRef.current?.id === DEMO_USER.id, []);
   const assertCanWrite = useCallback(() => {
     if (apiMode() || isLocalDemo()) return;
-    if (!userRef.current) throw new ApiError(401, 'unauthorized', 'Please sign in with Gothwad to continue.');
+    if (!userRef.current) throw new ApiError(401, 'unauthorized', 'Please sign in to continue.');
     throw new ApiError(503, 'backend_unavailable', 'The Store service is unavailable. Please try again later.');
   }, [apiMode, isLocalDemo]);
 
@@ -268,7 +268,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addReview = useCallback(async (appId: string, rating: number, body: string) => {
     assertCanWrite();
     const currentUser = userRef.current;
-    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in with Gothwad to continue.');
+    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in to continue.');
     if (apiMode()) {
       const { review } = await userApi.addReview(appId, rating, body);
       patch((current) => {
@@ -305,7 +305,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const registerDeveloper = useCallback(async (data: Omit<Developer, 'id' | 'userId' | 'username' | 'verified' | 'createdAt'>) => {
     assertCanWrite();
     const currentUser = userRef.current;
-    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in with Gothwad to continue.');
+    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in to continue.');
     if (apiMode()) {
       const { developer } = await devApi.register(data);
       patch((current) => ({ ...current, developer }));
@@ -419,7 +419,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const reportApp = useCallback(async (app: StoreApp, reason: string, details: string) => {
     assertCanWrite();
     const currentUser = userRef.current;
-    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in with Gothwad to continue.');
+    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in to continue.');
     if (apiMode()) {
       const { report } = await userApi.report(app.id, reason, details);
       if (report) patch((current) => ({ ...current, reports: [report, ...current.reports] }));

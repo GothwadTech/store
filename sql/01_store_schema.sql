@@ -111,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_reviews_app ON reviews (app_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS wishlists (
   user_id TEXT NOT NULL,
-  app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  app_id TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   PRIMARY KEY (user_id, app_id)
 );
@@ -131,7 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_downloads_ip_hash ON downloads (ip_hash);
 
 CREATE TABLE IF NOT EXISTS library (
   user_id TEXT NOT NULL,
-  app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  app_id TEXT NOT NULL,
   first_downloaded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   last_version_code INTEGER,
   PRIMARY KEY (user_id, app_id)

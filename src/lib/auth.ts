@@ -1,54 +1,26 @@
-// ── Sign in with Gothwad (Gothwad Accounts, .gothwadtech.com SSO + OAuth 2.0 PKCE) ──
+// First-party Gothwad Accounts SSO (.gothwadtech.com HttpOnly cookies)
 // Web rule: NEVER store access_token or refresh_token in localStorage or sessionStorage.
-// Primary web auth is .gothwadtech.com HttpOnly SSO cookies via Worker /api/me.
 import {
   API_BASE,
   AUTH_BASE,
   AUTH_SIGNIN_URL,
   BRAND,
-  OAUTH_CLIENT_ID,
   SITE_URLS,
   detectMode,
   isProductionHostCheck,
 } from './config';
 import { getAuthuserFromLocation } from './router';
-import type { GothwadUser } from '../types';
+import type { AccountSlotItem, GothwadUser } from '../types';
 
 let memoryAccessToken: string | null = null;
 let selectedAuthuser: number | null = null;
 
-const b64url = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-function savePkceState(payload: { v: string; s: string; r: string }) {
-  try {
-    window.name = `kiwi_pkce:${JSON.stringify(payload)}`;
-  } catch {
-    /* ignore */
-  }
+export function accountsApiOrigin(): string {
+  return AUTH_BASE.replace(/\/+$/, '').replace(/\/api$/, '');
 }
 
-function readPkceState(): { v?: string; s?: string; r?: string } {
-  try {
-    if (window.name.startsWith('kiwi_pkce:')) {
-      return JSON.parse(window.name.slice('kiwi_pkce:'.length)) as {
-        v?: string;
-        s?: string;
-        r?: string;
-      };
-    }
-  } catch {
-    /* ignore */
-  }
-  return {};
-}
-
-function clearPkceState() {
-  try {
-    if (window.name.startsWith('kiwi_pkce:')) window.name = '';
-  } catch {
-    /* ignore */
-  }
+export function accountsWebOrigin(): string {
+  return AUTH_SIGNIN_URL.replace(/\/+$/, '');
 }
 
 export function callbackRedirectUri(): string {
@@ -58,89 +30,63 @@ export function callbackRedirectUri(): string {
   return `${window.location.origin}/auth/callback`;
 }
 
-export function authorizeEndpointUrl(): string {
-  const origin = AUTH_BASE.replace(/\/+$/, '').replace(/\/api$/, '');
-  return `${origin}/oauth/authorize`;
-}
-
-export async function startGothwadSignIn(opts?: { authuser?: number }) {
-  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
-  const challenge = b64url(
-    new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))),
-  );
-  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
-  savePkceState({
-    v: verifier,
-    s: state,
-    r: window.location.pathname + window.location.search,
-  });
-
-  const u = new URL(authorizeEndpointUrl());
-  u.searchParams.set('client_id', OAUTH_CLIENT_ID);
-  u.searchParams.set('redirect_uri', callbackRedirectUri());
-  u.searchParams.set('response_type', 'code');
-  u.searchParams.set('scope', 'profile email offline_access');
-  u.searchParams.set('state', state);
-  u.searchParams.set('code_challenge', challenge);
-  u.searchParams.set('code_challenge_method', 'S256');
+export function buildSignInUrl(opts?: {
+  nextUrl?: string;
+  choose?: boolean;
+  add?: boolean;
+  authuser?: number | null;
+}): string {
+  const base = accountsWebOrigin();
+  const next =
+    opts?.nextUrl ||
+    (typeof window !== 'undefined' && window.location?.href ? window.location.href : SITE_URLS.store);
+  const u = new URL(`${base}/signin`);
+  if (opts?.choose) u.searchParams.set('choose', '1');
+  if (opts?.add) {
+    u.searchParams.set('choose', '1');
+    u.searchParams.set('add', '1');
+  }
   const au = opts?.authuser ?? getAuthuserFromLocation();
-  if (au !== null && au !== undefined) {
+  if (au !== null && au !== undefined && au >= 0 && au <= 5) {
     u.searchParams.set('authuser', String(au));
   }
-  window.location.href = u.toString();
+  u.searchParams.set('next', next);
+  return u.toString();
 }
 
-export function signInPageUrl(): string {
-  const next = encodeURIComponent(callbackRedirectUri());
-  return `${AUTH_SIGNIN_URL}/signin?choose=1&next=${next}`;
+export async function startGothwadSignIn(opts?: {
+  nextUrl?: string;
+  choose?: boolean;
+  add?: boolean;
+  authuser?: number | null;
+}): Promise<void> {
+  if (typeof window !== 'undefined') {
+    window.location.href = buildSignInUrl(opts);
+  }
 }
 
-export function addAccountUrl(): string {
-  const next = encodeURIComponent(window.location.href);
-  return `${AUTH_SIGNIN_URL}/signin?add=1&next=${next}`;
+export function signInPageUrl(nextUrl?: string): string {
+  return buildSignInUrl({ nextUrl, choose: true });
+}
+
+export function addAccountUrl(nextUrl?: string): string {
+  return buildSignInUrl({ nextUrl, choose: true, add: true });
 }
 
 export function manageAccountUrl(authuser = 0): string {
-  return `${AUTH_SIGNIN_URL}/u/${authuser}/me`;
+  return `${accountsWebOrigin()}/u/${authuser}/me`;
 }
 
-export function setActiveAuthuser(index: number | null) {
+export function widgetScriptUrl(): string {
+  return `${accountsWebOrigin()}/widget/account-menu.js`;
+}
+
+export function setActiveAuthuser(index: number | null): void {
   selectedAuthuser = index;
 }
 
 export function getActiveAuthuser(): number | null {
   return getAuthuserFromLocation() ?? selectedAuthuser;
-}
-
-/** /auth/callback par: code -> apne Worker se exchange -> user */
-export async function handleOAuthCallback(): Promise<{ user: GothwadUser } | { error: string }> {
-  const p = new URLSearchParams(window.location.search);
-  if (p.get('error')) return { error: p.get('error')! };
-  const pkce = readPkceState();
-  if (pkce.s && p.get('state') !== pkce.s) {
-    return { error: 'state_mismatch' };
-  }
-  try {
-    const res = await fetch(`${API_BASE}/auth/exchange`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        code: p.get('code'),
-        redirectUri: callbackRedirectUri(),
-        codeVerifier: pkce.v ?? '',
-      }),
-    });
-    clearPkceState();
-    if (!res.ok) return { error: 'exchange_failed' };
-    const data = await res.json();
-    if (typeof data.accessToken === 'string' && data.accessToken) {
-      memoryAccessToken = data.accessToken;
-    }
-    return { user: data.user };
-  } catch {
-    return { error: 'network' };
-  }
 }
 
 export function authHeaders(): Record<string, string> {
@@ -155,31 +101,173 @@ export function authHeaders(): Record<string, string> {
   return headers;
 }
 
-/** Worker /api/me - cookie ya Bearer se Accounts session verify */
-export async function fetchMe(): Promise<GothwadUser | null> {
+export function normalizeClientUser(raw: Record<string, unknown> | null | undefined): GothwadUser | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const username = String(raw.username ?? raw.preferred_username ?? '').trim().toLowerCase();
+  const id = String(raw.id ?? raw.sub ?? username).trim();
+  if (!username && !id) return null;
+  const firstName = String(raw.firstName ?? raw.first_name ?? '').trim();
+  const lastName = String(raw.lastName ?? raw.last_name ?? '').trim();
+  const name =
+    String(raw.name ?? ([firstName, lastName].filter(Boolean).join(' ') || username)).trim() ||
+    username;
+  const email = String(raw.email ?? `${username}@${BRAND.appDomain}`).trim().toLowerCase();
+  const avatarUrl = String(raw.avatarUrl ?? raw.avatar_url ?? raw.picture ?? '').trim() || undefined;
+  return {
+    id: id || username,
+    username: username || id.toLowerCase(),
+    name,
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
+    email,
+    picture: avatarUrl,
+    avatarUrl,
+  };
+}
+
+export function normalizeClientAccounts(
+  rawAccounts: unknown,
+  activeId: string | null,
+): AccountSlotItem[] {
+  if (!Array.isArray(rawAccounts)) return [];
+  return rawAccounts
+    .map((item, idx): AccountSlotItem | null => {
+      if (!item || typeof item !== 'object') return null;
+      const r = item as Record<string, unknown>;
+      const username = String(r.username ?? '').trim().toLowerCase();
+      const id = String(r.id ?? r.slot ?? idx).trim();
+      if (!username && !id) return null;
+      const authuser = typeof r.authuser === 'number' ? r.authuser : idx;
+      const firstName = String(r.firstName ?? r.first_name ?? '').trim();
+      const lastName = String(r.lastName ?? r.last_name ?? '').trim();
+      const name =
+        String(r.name ?? ([firstName, lastName].filter(Boolean).join(' ') || username)).trim() ||
+        username;
+      const email = String(r.email ?? `${username}@${BRAND.appDomain}`).trim().toLowerCase();
+      const avatarUrl = String(r.avatarUrl ?? r.avatar_url ?? r.picture ?? '').trim() || null;
+      return {
+        id,
+        slot: id,
+        authuser,
+        username,
+        firstName: firstName || undefined,
+        lastName: lastName || undefined,
+        name,
+        email,
+        avatarUrl,
+        picture: avatarUrl,
+        accountUrl: String(r.accountUrl ?? manageAccountUrl(authuser)),
+        active: activeId ? id === activeId : idx === 0,
+      };
+    })
+    .filter((x): x is AccountSlotItem => x !== null);
+}
+
+/** Direct browser silent SSO check against Gothwad Accounts API (`/api/auth/me`). */
+export async function fetchDirectAccountsSession(): Promise<{
+  user: GothwadUser;
+  activeSlot: string | null;
+  authuser: number;
+  accounts: AccountSlotItem[];
+} | null> {
   try {
-    const res = await fetch(`${API_BASE}/me`, { credentials: 'include', headers: authHeaders() });
+    const res = await fetch(`${accountsApiOrigin()}/api/auth/me`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { Accept: 'application/json', ...authHeaders() },
+    });
     if (!res.ok) return null;
-    const data = await res.json();
-    return data.user ?? null;
+    const d = (await res.json()) as Record<string, unknown>;
+    if (d.authenticated === false) return null;
+    const activeSlot =
+      typeof d.activeId === 'string'
+        ? d.activeId
+        : typeof d.activeSlot === 'string'
+          ? d.activeSlot
+          : null;
+    const authuser = typeof d.authuser === 'number' ? d.authuser : (getActiveAuthuser() ?? 0);
+    const accounts = normalizeClientAccounts(d.accounts, activeSlot);
+    const rawUser =
+      d.user && typeof d.user === 'object'
+        ? (d.user as Record<string, unknown>)
+        : (accounts.find((a) => a.active) as unknown as Record<string, unknown> | undefined);
+    const user = normalizeClientUser(rawUser);
+    if (!user) return null;
+    return { user, activeSlot, authuser, accounts };
   } catch {
     return null;
   }
 }
 
-export async function signOut(slotId?: string) {
-  const endpoint = slotId
-    ? `${API_BASE}/auth/accounts/${encodeURIComponent(slotId)}/signout`
-    : `${API_BASE}/auth/signout`;
+/** Compatibility handler if an external or legacy flow redirects to `/auth/callback`. */
+export async function handleOAuthCallback(): Promise<{ user: GothwadUser } | { error: string }> {
+  const direct = await fetchDirectAccountsSession();
+  if (direct?.user) return { user: direct.user };
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('error')) return { error: p.get('error')! };
+  const code = p.get('code');
+  if (!code) return { error: 'missing_code' };
   try {
-    await fetch(endpoint, {
+    const res = await fetch(`${API_BASE}/auth/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        code,
+        redirectUri: callbackRedirectUri(),
+        codeVerifier: '',
+      }),
+    });
+    if (!res.ok) return { error: 'exchange_failed' };
+    const data = await res.json();
+    if (typeof data.accessToken === 'string' && data.accessToken) {
+      memoryAccessToken = data.accessToken;
+    }
+    return { user: data.user };
+  } catch {
+    return { error: 'network' };
+  }
+}
+
+export async function fetchMe(): Promise<GothwadUser | null> {
+  try {
+    const res = await fetch(`${API_BASE}/me`, { credentials: 'include', headers: authHeaders() });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.user) return data.user;
+    }
+  } catch {
+    /* fall through to direct Accounts SSO */
+  }
+  const direct = await fetchDirectAccountsSession();
+  return direct?.user ?? null;
+}
+
+export async function signOut(slotId?: string): Promise<void> {
+  const path = slotId
+    ? `/auth/accounts/${encodeURIComponent(slotId)}/signout`
+    : '/auth/signout';
+  const payload = JSON.stringify(slotId ? { id: slotId } : {});
+  const hdrs = { 'Content-Type': 'application/json', ...authHeaders() };
+  try {
+    const r = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(slotId ? { id: slotId } : {}),
+      headers: hdrs,
+      body: payload,
     });
+    if (!r.ok) throw new Error('worker_signout_failed');
   } catch {
-    /* ignore */
+    try {
+      await fetch(`${accountsApiOrigin()}/api${path}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: hdrs,
+        body: payload,
+      });
+    } catch {
+      /* ignore */
+    }
   }
   if (!slotId) {
     memoryAccessToken = null;

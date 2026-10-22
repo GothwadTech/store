@@ -66,7 +66,8 @@ function NavList({ tab, setTab, counts, onNavigate }: { tab: Tab; setTab: (t: Ta
 }
 
 export default function AdminApp() {
-  const { apps, submissions, reports, decideSubmission, setAppStatus, resolveReport, user, signOut } = useApp();
+  const { apps: rawApps, submissions, reports, decideSubmission, setAppStatus, resolveReport, user, signOut } = useApp();
+  const apps = rawApps.filter((a) => !a.id.startsWith('fdroid:'));
   const [path, navigate] = usePath();
   const [tab, setTab] = useState<Tab>('queue');
   const [notes, setNotes] = useState<Record<string, string>>({});

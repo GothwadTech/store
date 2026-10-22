@@ -29,7 +29,7 @@ export function withAuthuserPrefix(to: string, explicitIndex?: number | null): s
   return clean === '/' ? `/u/${idx}` : `/u/${idx}${clean}`;
 }
 
-/** Chhota path-router (4 shells + /u/0..5 multi-account URL prefix support) */
+/** Lightweight path router across all 4 surfaces with /u/0..5 multi-account URL prefix support. */
 export function usePath(): [string, (to: string) => void] {
   const [path, setPath] = useState(() => stripAuthuserPrefix(window.location.pathname));
   useEffect(() => {
