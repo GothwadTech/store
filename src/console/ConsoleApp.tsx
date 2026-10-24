@@ -1,24 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  BarChart3,
-  CheckCircle2,
-  Download,
-  LoaderCircle,
-  MessageSquareText,
-  Smartphone,
-  Star,
-  X,
+  BarChart3, CheckCircle2, Download, LoaderCircle, MessageSquareText, Smartphone, Star, X,
 } from 'lucide-react';
 import { useApp } from '../lib/AppContext';
 import { usePath } from '../lib/router';
 import {
-  Card,
-  EmptyState,
-  PageHeader,
-  SignInPrompt,
-  StatCard,
-  btnGhost,
-  btnPrimary,
+  Card, EmptyState, PageHeader, SignInPrompt, StatCard, btnGhost, btnPrimary,
 } from '../shared/ui';
 import { BackendNotice } from '../shared/BackendNotice';
 import { formatCount } from '../lib/storage';
@@ -383,44 +370,62 @@ function Callback() {
 
 export default function ConsoleApp() {
   const [path, navigate] = usePath();
-  const { user, developer, apps, authReady, backendLive, demoModeAvailable, isDemoUser } = useApp();
+  const {
+    user, developer, apps, authReady, authStatus, authError, permissionsStatus,
+    developerStatus, developerError, backendLive, demoModeAvailable, isDemoUser,
+    retryAuth, retryDeveloper,
+  } = useApp();
   if (path === '/auth/callback') {
-    return (
-      <div className="min-h-dvh bg-[#212121] text-neutral-200">
-        <Callback />
-      </div>
-    );
+    return <div className="min-h-dvh bg-[#212121] text-neutral-200"><Callback /></div>;
   }
-  if (!authReady) {
+  if (!authReady || authStatus === 'loading') {
     return (
       <div className="grid min-h-dvh place-items-center bg-[#212121] text-neutral-400">
         Checking your Gothwad Account…
       </div>
     );
   }
-  if (!user) {
+  if (!user && authStatus === 'unavailable') {
     return (
-      <div className="min-h-dvh bg-[#212121]">
-        <SignInPrompt what="Developer Console" />
+      <div className="grid min-h-dvh place-items-center bg-[#212121] px-4 text-neutral-200">
+        <div className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#262626] p-7 text-center">
+          <h1 className="font-display text-lg font-bold text-white">Could not verify your Gothwad Account</h1>
+          <p className="mt-2 text-sm text-neutral-300">
+            {authError || 'The authentication service is temporarily unreachable. Please try again.'}
+          </p>
+          <button type="button" onClick={() => void retryAuth()} className={`${btnPrimary} mt-5 inline-flex`}>
+            Retry verification
+          </button>
+        </div>
       </div>
     );
   }
-  if (!backendLive && !(demoModeAvailable && isDemoUser)) {
-    return (
-      <div className="min-h-dvh bg-[#212121] px-4 py-12 text-neutral-300">
-        <BackendNotice />
-        <p className="mx-auto mt-5 max-w-xl text-center text-sm text-neutral-400">
-          Developer tools are unavailable until the Store service is connected.
-        </p>
-      </div>
-    );
-  }
-  if (!developer && path !== '/onboarding') {
+  if (!user) return <div className="min-h-dvh bg-[#212121]"><SignInPrompt what="Developer Console" /></div>;
+  if (!(demoModeAvailable && isDemoUser) && (developerStatus === 'loading' || permissionsStatus === 'loading')) {
     return (
       <Shell navigate={navigate} path={path}>
-        <Onboarding />
+        <div className="flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-[#262626]/70 px-5 py-6 text-sm text-neutral-300">
+          <LoaderCircle size={16} className="animate-spin text-emerald-400" />
+          Loading your developer workspace…
+        </div>
       </Shell>
     );
+  }
+  if (!(demoModeAvailable && isDemoUser) && (developerStatus === 'unavailable' || permissionsStatus === 'unavailable' || !backendLive)) {
+    return (
+      <Shell navigate={navigate} path={path}>
+        <BackendNotice />
+        <div className="mx-auto mt-5 flex max-w-xl flex-col items-center gap-3 text-center text-sm text-neutral-400">
+          <p>{developerError || 'Developer tools are unavailable until the Store service is connected.'}</p>
+          <button type="button" onClick={() => void retryDeveloper()} className={`${btnPrimary} inline-flex`}>
+            Retry workspace
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+  if ((!developer || developerStatus === 'none') && path !== '/onboarding') {
+    return <Shell navigate={navigate} path={path}><Onboarding /></Shell>;
   }
   let page: React.ReactNode = <Dashboard navigate={navigate} />;
   if (path === '/onboarding') page = <Onboarding />;

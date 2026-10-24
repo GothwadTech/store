@@ -76,7 +76,9 @@ async function route(req: Request, env: Env, ctx?: ExecutionContext): Promise<Re
   }
 
   // ── Auth & Multi-Account Session ─────────────────────────────────
-  if (path === '/api/me' && method === 'GET') return handleMe(req, env);
+  if ((path === '/api/me' || path === '/api/auth/session') && method === 'GET') {
+    return handleMe(req, env);
+  }
   if (path === '/api/auth/exchange' && method === 'POST') return handleAuthExchange(req, env);
   if (path === '/api/auth/signout' && method === 'POST') return handleAuthSignOut(req, env);
   if (path === '/api/auth/accounts' && method === 'GET') return handleAuthAccounts(req, env);

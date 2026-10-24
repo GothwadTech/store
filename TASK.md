@@ -1,4 +1,4 @@
-# ✅ TASK TRACKER — Kiwi Store D1, F-Droid & Universal SSO
+# ✅ TASK TRACKER — Kiwi Store D1, F-Droid, Universal SSO & Fast Identity Startup
 
 ## 1. Completed Milestones
 
@@ -15,31 +15,27 @@
 - [x] **F-Droid Open Source Catalog & Live Search Integration**:
   - Added `worker/src/fdroid-data.ts` (curated popular open-source Android apps & games) and `worker/src/fdroid.ts` (Edge-cached F-Droid search API + live package version metadata resolver + icon proxy fallback).
   - Wired `GET /api/store/fdroid?q=<query>`, `GET /api/store/apps?fdroid=1`, `GET /api/store/home`, `GET /api/store/charts`, `GET /api/store/search`, `GET /api/store/apps/fdroid:<pkg>`, `GET /api/download/fdroid:<pkg>`, and `GET /api/fdroid/icon/:pkg` while keeping default `GET /api/store/apps` pure D1 for Android `storeapp` compatibility.
-  - Added **F-Droid Open Source** rail, source filter pills (`All Sources`, `Kiwi Store`, `F-Droid Open Source`), live F-Droid search merge, and purple `F-Droid` badges on `StoreApp.tsx` and `StorePages.tsx`.
 
-- [x] **Automatic `.gothwadtech.com` Silent SSO & First-Party Sign-In**:
-  - Activated `routes = [...]` in `worker/wrangler.toml` for `kiwistore.gothwadtech.com/api/*`, `kiwiconsole.gothwadtech.com/api/*`, `kiwiadmin.gothwadtech.com/api/*`, and `kiwiapp.gothwadtech.com/api/*` (`zone_name = "gothwadtech.com"`).
-  - Added automatic direct browser silent SSO fallback (`fetchDirectAccountsSession()` -> `GET https://api.gothwadtech.com/api/auth/me` with `credentials: 'include'`) in `src/lib/auth.ts` and `src/lib/api.ts`.
-  - Replaced third-party web `/oauth/authorize` consent flows and `"Sign in with Gothwad"` labels with direct first-party `"Sign in"` (`https://accounts.gothwadtech.com/signin?next=<current_url>`), while preserving `Authorization: Bearer <token>` and `POST /api/auth/exchange` for the native Android `storeapp`.
+- [x] **Decoupled Fast Identity Startup, Surface Isolation & Failure Resilience**:
+  - Added lightweight verified identity endpoints `GET /api/auth/session` and `GET /api/me?light=1` (`deferDeveloper=1`) in `worker/src/auth.ts` and `worker/src/index.ts`, returning verified user + server-derived `isAdmin` + multi-account slots with `developerStatus: 'deferred'` without blocking on D1 `ensureSchema` or `getDeveloperForUser`.
+  - Wrapped D1 developer profile lookup in `handleMe` in `try/catch` so D1 failures still return `200` with verified `user`, `isAdmin`, `developer: null`, and `developerStatus: 'unavailable'`.
+  - Hardened `resolveSession` on both Bearer and Cookie paths to mark `429`, `5xx`, network errors, and non-JSON/HTML `200` responses as `upstreamUnavailable: true` (`503 auth_unavailable`), and marked authoritative `401` responses so the client never fires a redundant direct-Accounts fallback call on confirmed anonymous sessions.
+  - Added `src/lib/sessionClient.ts` (`resolveSessionState`, `clearInflightSessions`) with per-`authuser` and generation in-flight deduplication and distinct `authenticated`, `anonymous`, and `unavailable` states.
+  - Decoupled `hydrateIdentity`, `hydrateCatalog`, `hydrateLibrary`, `hydrateDeveloper`, and `hydrateAdmin` in `src/lib/AppContext.tsx` with generation counters (`bumpAuthGeneration`) and `AbortController` cancellation so stale responses across account switch/sign-out/remounts are ignored and private state is wiped immediately on switch/sign-out.
+  - Updated `StorePages.tsx`, `ConsoleApp.tsx`, `AdminApp.tsx`, and `AccountMenu.tsx` to render local skeletons and retryable `unavailable` error states, preserving verified identity when Store permissions/workspace are unavailable and never showing false "Admin access required" or false `<Onboarding />` screens.
 
-- [x] **Universal Google-Style Account Switcher (`window.GothwadAccountMenu`) & Post-Merge Hardening**:
-  - Updated `src/shared/AccountMenu.tsx` and `src/shared/gothwadAccountMenuFallback.ts` to load `https://accounts.gothwadtech.com/widget/account-menu.js` (`window.GothwadAccountMenu.open(state, opts)`) with a resilient Shadow-DOM fallback for offline/local environments.
-  - Fixed `onSignOutAccount` (`resolveSignOutSlotId` / `signOutAccountSlot`) so primitive slot IDs (`onSignOutAccount("b", target)`) and account objects (`onSignOutAccount({ id: "b" })`) strictly sign out only that single slot (`/api/auth/accounts/b/signout`) and never wipe all browser accounts.
-  - Added Google-style `+N` multi-account badge on the header avatar trigger when `accounts.length > 1`, plus `{ id, label, href, onClick }` cross-surface actions (`Kiwi Store`, `Kiwi Console`, `Kiwi Admin`).
-  - Extracted zero-React URL/slot helpers into `src/lib/authuser.ts` and pinned `"typescript": "^5.8.3"` in `package.json` so `rm -rf node_modules && npm ci && npm run lint && npm test && npm run build` succeeds cleanly.
-
-- [x] **Strict Code Hygiene & `<= 500` Lines Per File**:
-  - Every source, Worker, SQL, test, and documentation file is strictly `<= 500` lines and written in 100% pure English.
+- [x] **Universal Google-Style Account Switcher (`window.GothwadAccountMenu`) & Strict Hygiene**:
+  - Preserved single-slot `onSignOutAccount(slotId, target)` (`resolveSignOutSlotId`), `+N` multi-account avatar badge, non-destructive failed account switch (`authApi.switchAccount` throws before URL/identity mutation), `sanitizeNextUrl` open-redirect protection, and `<= 500` lines per file across the entire repository.
 
 ---
 
 ## 2. Verification Commands
 
 ```bash
-rm -rf node_modules && npm ci
+rm -rf node_modules && npm ci && (cd worker && npm ci)
 npm run lint                                # 0 errors (TypeScript web + worker)
-npm test                                    # 43/43 unit + integration tests passing
+npm test                                    # 50/50 unit + integration tests passing
 npm run build                               # Vite production bundle
-npm run test:ui                             # 8/8 JSDOM render smoke tests passing
-(cd worker && npx wrangler deploy --dry-run) # Cloudflare Worker + D1 binding validation
+npm run test:ui                             # 13/13 JSDOM render & startup tests passing
+npx wrangler deploy --dry-run --config worker/wrangler.toml
 ```

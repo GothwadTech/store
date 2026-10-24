@@ -23,17 +23,24 @@ The native Android client lives in [`GothwadTech/storeapp`](https://github.com/G
 | [`docs/KIWI_MIGRATION.md`](docs/KIWI_MIGRATION.md) | Domain, Cloudflare D1 binding, and Worker route configuration reference |
 | [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) | Third-party developer guide for publishing Android apps on Kiwi Store |
 | [`sql/README.md`](sql/README.md) | Idempotent Cloudflare D1 SQLite migrations (`00_d1_console_bootstrap.sql`, `01_store_schema.sql`) |
-| [`PLAN.md`](PLAN.md) | Architecture, D1 schema, API endpoints, and security specification |
+| [`PLAN.md`](PLAN.md) | Architecture, decoupled startup model, D1 schema, API endpoints, and security specification |
 | [`TASK.md`](TASK.md) | Completed engineering milestones and verification checklist |
 | [`HANDOVER.md`](HANDOVER.md) | Project handover, architecture guardrails, and operational reference |
 
 ---
 
-## 🔐 Automatic `.gothwadtech.com` Silent SSO & Universal Account Switcher
+## 🔐 Fast Identity Startup, `.gothwadtech.com` Silent SSO & Universal Account Switcher
 
-- **Silent First-Party SSO**: Signing into `accounts.gothwadtech.com`, `mail.gothwadtech.com`, or any `*.gothwadtech.com` surface sets the shared `.gothwadtech.com` SSO cookies. Opening `kiwistore`, `kiwiconsole`, `kiwiadmin`, or `kiwiapp` automatically detects the active session via `/api/me` and direct browser fallback to `https://api.gothwadtech.com/api/auth/me` (`credentials: 'include'`).
-- **First-Party Sign-In**: Clicking **Sign in** navigates directly to `https://accounts.gothwadtech.com/signin?next=<current_url>` with zero third-party OAuth consent prompts on web, while preserving `Authorization: Bearer <token>` and `POST /api/auth/exchange` for the native Android `storeapp`.
-- **Universal Account Menu (`window.GothwadAccountMenu`)**: Clicking the top-right profile avatar opens the Google-style Account Sheet (`https://accounts.gothwadtech.com/widget/account-menu.js` with offline Shadow-DOM fallback), supporting up to **6 simultaneous signed-in accounts** (`/u/0`..`/u/5`, `?authuser=N`, `X-Gothwad-Authuser`).
+- **Decoupled Identity, Authorization, Catalog, and Surface Data Readiness**:
+  - Public Store catalog (`GET /api/store/apps?fdroid=1` + `GET /api/store/categories`) and identity verification (`GET /api/me?light=1` / `GET /api/auth/session`) run independently and concurrently.
+  - Verified identity and account-menu state publish immediately without waiting for catalog, library/wishlist, developer bundle, or admin moderation queries.
+  - Surface-specific private data loads lazily only for the active surface (`library`+`wishlist` on Store, `GET /api/dev/apps` on Console, `GET /api/admin/*` on Admin after server-verified `isAdmin === true`).
+- **Silent First-Party SSO & Resilient Error Semantics**:
+  - Authoritative `401` or `authenticated: false` responses from `/api/me` resolve immediately as `anonymous` without redundant fallback requests.
+  - Network failures, `429`, `5xx`, and HTML responses resolve as `unavailable` with local retry controls (never falsely treating transient outages as signed-out or redirecting to `/signin`).
+  - When direct Accounts fallback (`GET https://accounts.gothwadtech.com/api/auth/accounts`) verifies identity while the Store Worker is unreachable, the client retains the verified identity while marking Store permissions/workspace `unavailable` (never manufacturing false "not admin" or "create developer profile" states).
+- **Universal Account Menu (`window.GothwadAccountMenu`)**:
+  - Clicking the top-right profile avatar opens the Google-style Account Sheet (`https://accounts.gothwadtech.com/widget/account-menu.js` with offline Shadow-DOM fallback), supporting up to **6 simultaneous signed-in accounts** (`/u/0`..`/u/5`, `?authuser=N`, `X-Gothwad-Authuser`).
 
 ---
 
@@ -41,16 +48,16 @@ The native Android client lives in [`GothwadTech/storeapp`](https://github.com/G
 
 ```bash
 # 1. Install dependencies & run frontend + tests
-npm install
+npm ci
 npm run dev       # http://localhost:5173 (?mode=store | console | admin | storeapp)
-npm run lint      # ESLint + TypeScript typecheck
-npm test          # Node test suite (D1 SQLite + F-Droid + SSO + brand + upload guards)
+npm run lint      # TypeScript typecheck (web + worker)
+npm test          # Node test suite (D1 SQLite + F-Droid + SSO + startup/resilience + brand + upload guards)
 npm run build     # Production Vite bundle -> dist/
-npm run test:ui   # Headless JSDOM render smoke test across all 4 surfaces
+npm run test:ui   # Headless JSDOM render & startup regression suite across all 4 surfaces
 
 # 2. Cloudflare Worker (API)
 cd worker
-npm install
+npm ci
 cp .dev.vars.example .dev.vars
 npm run dev       # http://localhost:8787
 ```

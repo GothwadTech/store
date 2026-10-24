@@ -314,11 +314,42 @@ export function SearchPage({ navigate, query }: { navigate: (p: string) => void;
 }
 
 export function LibraryPage({ navigate }: { navigate: (p: string) => void }) {
-  const { user, apps, library, wishlist, authReady } = useApp();
-  if (!authReady) {
+  const {
+    user,
+    apps,
+    library,
+    wishlist,
+    authReady,
+    authStatus,
+    authError,
+    libraryStatus,
+    libraryError,
+    retryAuth,
+    retryLibrary,
+  } = useApp();
+  if (!authReady || authStatus === 'loading') {
     return (
       <main className="mx-auto max-w-5xl px-4 py-16 text-center text-sm text-neutral-400">
         Checking your Gothwad Account…
+      </main>
+    );
+  }
+  if (!user && authStatus === 'unavailable') {
+    return (
+      <main className="mx-auto max-w-md px-4 py-16 text-center">
+        <div className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-6">
+          <h1 className="font-display text-lg font-bold text-white">Could not verify your Gothwad Account</h1>
+          <p className="mt-2 text-sm text-neutral-300">
+            {authError || 'The authentication service is temporarily unreachable. Please try again.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => void retryAuth()}
+            className="mt-4 inline-flex items-center justify-center rounded-full bg-emerald-400 px-5 py-2 text-sm font-semibold text-neutral-950 transition hover:bg-emerald-300"
+          >
+            Retry verification
+          </button>
+        </div>
       </main>
     );
   }
@@ -338,6 +369,24 @@ export function LibraryPage({ navigate }: { navigate: (p: string) => void }) {
           </p>
         </div>
       </div>
+
+      {libraryStatus === 'loading' && (
+        <div className="mt-5 rounded-2xl border border-white/[0.08] bg-[#262626]/60 px-4 py-3 text-sm text-neutral-300">
+          Syncing your saved apps and downloads…
+        </div>
+      )}
+      {libraryStatus === 'unavailable' && (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <span>{libraryError || 'Could not load your library and wishlist right now.'}</span>
+          <button
+            type="button"
+            onClick={() => void retryLibrary()}
+            className="rounded-full bg-amber-400 px-3.5 py-1 text-xs font-semibold text-neutral-950 hover:bg-amber-300"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="mt-7 grid gap-3 sm:grid-cols-2">
         <div className="rounded-2xl border border-white/[0.08] bg-[#262626]/70 p-4">
