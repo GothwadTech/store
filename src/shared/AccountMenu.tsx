@@ -22,15 +22,38 @@ export function AccountMenu({
   size?: number;
   showSignIn?: boolean;
 }) {
-  const { user, accounts, activeSlot, authuser, isAdmin, switchAccount, signOutSlot, signOut } = useApp();
+  const {
+    user,
+    accounts,
+    activeSlot,
+    authuser,
+    authStatus,
+    isAdmin,
+    switchAccount,
+    signOutSlot,
+    signOut,
+    retryAuth,
+  } = useApp();
   const btnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    void ensureGothwadAccountMenu();
-  }, []);
+    if (user) void ensureGothwadAccountMenu();
+  }, [user]);
 
   if (!user) {
     if (!showSignIn) return null;
+    if (authStatus === 'unavailable') {
+      return (
+        <button
+          type="button"
+          onClick={() => void retryAuth()}
+          title="Could not verify your Gothwad Account. Click to retry."
+          className="inline-flex items-center justify-center rounded-full border border-amber-300 bg-amber-50 px-3.5 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/50 dark:text-amber-200"
+        >
+          Retry account
+        </button>
+      );
+    }
     return (
       <a
         href={buildSignInUrl()}

@@ -16,9 +16,77 @@ import { APP_NAME, ECOSYSTEM_NAME, SITE_HOSTS } from '../lib/config';
 type Tab = 'queue' | 'apps' | 'reports';
 
 function Gate({ children }: { children: React.ReactNode }) {
-  const { user, isAdmin, authReady, backendLive, demoModeAvailable, isDemoUser, signOut } = useApp();
-  if (!authReady) return <div className="grid min-h-dvh place-items-center bg-[#212121] text-neutral-400">Checking your Gothwad Account…</div>;
-  if (!user) return <div className="min-h-dvh bg-[#212121]"><SignInPrompt what="Store Admin" /></div>;
+  const {
+    user,
+    isAdmin,
+    authReady,
+    authStatus,
+    authError,
+    permissionsStatus,
+    adminStatus,
+    backendLive,
+    demoModeAvailable,
+    isDemoUser,
+    signOut,
+    retryAuth,
+  } = useApp();
+  if (!authReady || authStatus === 'loading') {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-[#212121] text-neutral-400">
+        Checking your Gothwad Account…
+      </div>
+    );
+  }
+  if (!user && authStatus === 'unavailable') {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-[#212121] px-4 text-center text-neutral-200">
+        <div className="max-w-md rounded-3xl border border-amber-500/30 bg-[#262626] p-7">
+          <h1 className="font-display text-xl font-bold text-white">Could not verify your Gothwad Account</h1>
+          <p className="mt-2 text-sm text-neutral-300">
+            {authError || 'The authentication service is temporarily unreachable. Please try again.'}
+          </p>
+          <Button variant="primary" size="sm" className="mt-5" onClick={() => void retryAuth()}>
+            Retry verification
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  if (!user) {
+    return (
+      <div className="min-h-dvh bg-[#212121]">
+        <SignInPrompt what="Store Admin" />
+      </div>
+    );
+  }
+  if (!(demoModeAvailable && isDemoUser) && permissionsStatus === 'loading') {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-[#212121] text-neutral-400">
+        Verifying administrator permissions…
+      </div>
+    );
+  }
+  if (!(demoModeAvailable && isDemoUser) && permissionsStatus === 'unavailable') {
+    return (
+      <div className="min-h-dvh bg-[#212121] px-4 py-12 text-neutral-300">
+        <div className="mx-auto mb-4 flex max-w-3xl items-center justify-between rounded-2xl border border-white/10 bg-[#262626] px-4 py-3 text-sm">
+          <span>Signed in as @{user.username}</span>
+          <AccountMenu size={34} />
+        </div>
+        <div className="mx-auto max-w-3xl">
+          <BackendNotice />
+        </div>
+        <div className="mx-auto mt-5 flex max-w-xl flex-col items-center gap-3 text-center text-sm text-neutral-400">
+          <p>
+            Could not verify administrator permissions because the Store service is temporarily unavailable.
+          </p>
+          <Button variant="primary" size="sm" onClick={() => void retryAuth()}>
+            Retry permissions check
+          </Button>
+        </div>
+      </div>
+    );
+  }
   if (!isAdmin)
     return (
       <div className="grid min-h-dvh place-items-center bg-[#212121] px-4 text-center">
@@ -28,11 +96,14 @@ function Gate({ children }: { children: React.ReactNode }) {
           <p className="mx-auto mt-2 text-sm leading-relaxed text-neutral-400">
             @{user.username} is not listed in ADMIN_USERNAMES. This panel is restricted to {APP_NAME} administrators.
           </p>
-          <Button variant="secondary" size="sm" className="mt-6" onClick={signOut}><LogOut size={15} /> Sign out</Button>
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <AccountMenu size={36} />
+            <Button variant="secondary" size="sm" onClick={signOut}><LogOut size={15} /> Sign out</Button>
+          </div>
         </div>
       </div>
     );
-  if (!backendLive && !(demoModeAvailable && isDemoUser))
+  if (!backendLive && adminStatus !== 'loading' && !(demoModeAvailable && isDemoUser))
     return (
       <div className="min-h-dvh bg-[#212121] px-4 py-12 text-neutral-300">
         <div className="mx-auto max-w-3xl"><BackendNotice /></div>
@@ -66,7 +137,19 @@ function NavList({ tab, setTab, counts, onNavigate }: { tab: Tab; setTab: (t: Ta
 }
 
 export default function AdminApp() {
-  const { apps: rawApps, submissions, reports, decideSubmission, setAppStatus, resolveReport, user, signOut } = useApp();
+  const {
+    apps: rawApps,
+    submissions,
+    reports,
+    adminStatus,
+    adminError,
+    decideSubmission,
+    setAppStatus,
+    resolveReport,
+    retryAdmin,
+    user,
+    signOut,
+  } = useApp();
   const apps = rawApps.filter((a) => !a.id.startsWith('fdroid:'));
   const [path, navigate] = usePath();
   const [tab, setTab] = useState<Tab>('queue');
@@ -135,6 +218,19 @@ export default function AdminApp() {
 
         <main className="mx-auto w-full max-w-[1180px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
           <BackendNotice />
+          {adminStatus === 'loading' && (
+            <div className="mb-5 rounded-2xl border border-white/[0.08] bg-[#262626]/70 px-4 py-3 text-sm text-neutral-300">
+              Loading moderation queue and store reports…
+            </div>
+          )}
+          {adminStatus === 'unavailable' && (
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+              <span>{adminError || 'Could not load moderation data from the Store service.'}</span>
+              <Button variant="primary" size="sm" onClick={() => void retryAdmin()}>
+                Retry moderation data
+              </Button>
+            </div>
+          )}
 
           <div className="mb-6 grid grid-cols-2 gap-3.5 xl:grid-cols-4">
             <StatCard label="In queue" value={String(pending.length)} sub="Waiting for review" icon={Inbox} tone={pending.length ? 'amber' : 'neutral'} />

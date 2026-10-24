@@ -6,19 +6,41 @@ import {
   accountsApiOrigin,
   authHeaders,
   fetchDirectAccountsSession,
-  manageAccountUrl,
+  resolveDirectAccountsSession,
 } from './auth';
+import {
+  clearInflightSessions,
+  fetchSession,
+  resolveSessionState,
+  type DeveloperResolutionStatus,
+  type PermissionResolutionStatus,
+  type SessionInfo,
+  type SessionResolutionResult,
+  type SessionResolutionStatus,
+} from './sessionClient';
 import type {
   AccountSlotItem,
   AppRelease,
   Category,
   Developer,
-  GothwadUser,
   ReportItem,
   Review,
   StoreApp,
   Submission,
 } from '../types';
+
+export {
+  clearInflightSessions,
+  fetchDirectAccountsSession,
+  fetchSession,
+  resolveDirectAccountsSession,
+  resolveSessionState,
+  type DeveloperResolutionStatus,
+  type PermissionResolutionStatus,
+  type SessionInfo,
+  type SessionResolutionResult,
+  type SessionResolutionStatus,
+};
 
 export class ApiError extends Error {
   status: number;
@@ -58,13 +80,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     res = await fetch(apiUrl(path), {
       ...init,
       credentials: 'include',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init.headers ?? {}) },
     });
-  } catch {
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'AbortError') throw err;
     throw new ApiError(0, 'network', 'Could not reach the Store API. Check your connection and try again.');
   }
   const data = await responseData(res);
   if (!res.ok) throw parseError(res.status, data, `Request failed (${res.status})`);
+  if (data === null || typeof data !== 'object') {
+    throw new ApiError(502, 'invalid_response', 'Received an unexpected response from the Store API.');
+  }
   return data as T;
 }
 
@@ -145,95 +172,60 @@ async function retryUpload<T>(work: () => Promise<T>, attempts = 3): Promise<T> 
   throw lastError instanceof Error ? lastError : new ApiError(0, 'upload_failed', 'Upload failed.');
 }
 
-export interface SessionInfo {
-  user: GothwadUser;
-  developer: Developer | null;
-  isAdmin: boolean;
-  d1Configured: boolean;
-  activeSlot: string | null;
-  authuser: number;
-  accounts: AccountSlotItem[];
-  accountUrl?: string;
-}
-
-export async function fetchSession(): Promise<SessionInfo | null> {
-  try {
-    const d = await request<{
-      user: GothwadUser;
-      developer: Developer | null;
-      isAdmin: boolean;
-      activeSlot?: string | null;
-      activeId?: string | null;
-      authuser?: number;
-      accounts?: AccountSlotItem[];
-      accountUrl?: string;
-      configured?: { d1?: boolean; githubApk?: boolean };
-    }>('/me');
-    if (d?.user) {
-      return {
-        user: d.user,
-        developer: d.developer ?? null,
-        isAdmin: !!d.isAdmin,
-        d1Configured: !!d.configured?.d1,
-        activeSlot: d.activeSlot ?? d.activeId ?? null,
-        authuser: typeof d.authuser === 'number' ? d.authuser : 0,
-        accounts: Array.isArray(d.accounts) ? d.accounts : [],
-        accountUrl: d.accountUrl,
-      };
-    }
-  } catch {
-    /* Fall through to direct browser silent SSO check */
-  }
-  const direct = await fetchDirectAccountsSession();
-  if (!direct?.user) return null;
-  return {
-    user: direct.user,
-    developer: null,
-    isAdmin: false,
-    d1Configured: false,
-    activeSlot: direct.activeSlot,
-    authuser: direct.authuser,
-    accounts: direct.accounts,
-    accountUrl: manageAccountUrl(direct.authuser),
-  };
-}
-
 export const authApi = {
   accounts: async () => {
     try {
       return await request<{ authenticated: boolean; activeId: string | null; authuser: number; accounts: AccountSlotItem[] }>('/auth/accounts');
     } catch {
-      const direct = await fetchDirectAccountsSession();
+      const direct = await resolveDirectAccountsSession();
       return {
-        authenticated: Boolean(direct?.user),
-        activeId: direct?.activeSlot ?? null,
-        authuser: direct?.authuser ?? 0,
-        accounts: direct?.accounts ?? [],
+        authenticated: direct.status === 'authenticated',
+        activeId: direct.activeSlot,
+        authuser: direct.authuser,
+        accounts: direct.accounts,
       };
     }
   },
   switchAccount: async (payload: { id?: string; authuser?: number }) => {
     try {
-      return await request<{ ok?: boolean; activeId?: string; authuser?: number }>('/auth/switch', { method: 'POST', body: JSON.stringify(payload) });
-    } catch {
-      const r = await fetch(`${accountsApiOrigin()}/api/auth/switch`, {
+      return await request<{ ok?: boolean; activeId?: string; authuser?: number }>('/auth/switch', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...authHeaders() },
         body: JSON.stringify(payload),
       });
-      return (await r.json().catch(() => ({}))) as { ok?: boolean; activeId?: string; authuser?: number };
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 400 || err.status === 401 || err.status === 403 || err.status === 429)) {
+        throw err;
+      }
+      let r: Response;
+      try {
+        r = await fetch(`${accountsApiOrigin()}/api/auth/switch`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...authHeaders() },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        throw new ApiError(0, 'network', 'Could not switch accounts. Check your connection and try again.');
+      }
+      const data = await responseData(r);
+      if (!r.ok) throw parseError(r.status, data, `Account switch failed (${r.status})`);
+      return (data ?? { ok: true }) as { ok?: boolean; activeId?: string; authuser?: number };
     }
   },
   signOutSlot: async (slotId: string) => {
+    const trimmed = typeof slotId === 'string' ? slotId.trim() : '';
+    if (!trimmed) return { ok: false };
     try {
-      return await request<{ ok: boolean }>(`/auth/accounts/${encodeURIComponent(slotId)}/signout`, { method: 'POST', body: JSON.stringify({ id: slotId }) });
+      return await request<{ ok: boolean }>(`/auth/accounts/${encodeURIComponent(trimmed)}/signout`, {
+        method: 'POST',
+        body: JSON.stringify({ id: trimmed }),
+      });
     } catch {
-      await fetch(`${accountsApiOrigin()}/api/auth/accounts/${encodeURIComponent(slotId)}/signout`, {
+      await fetch(`${accountsApiOrigin()}/api/auth/accounts/${encodeURIComponent(trimmed)}/signout`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ id: slotId }),
+        body: JSON.stringify({ id: trimmed }),
       });
       return { ok: true };
     }
@@ -258,11 +250,11 @@ interface CatalogResponse {
 }
 
 /** Load live catalog records (Kiwi Store D1 + F-Droid Open Source); never substitute local sample listings. */
-export async function fetchCatalog(): Promise<Catalog> {
+export async function fetchCatalog(signal?: AbortSignal): Promise<Catalog> {
   try {
     const [appsRes, catRes] = await Promise.all([
-      request<CatalogResponse>('/store/apps?fdroid=1'),
-      request<{ categories?: Category[]; source?: string }>('/store/categories'),
+      request<CatalogResponse>('/store/apps?fdroid=1', { signal }),
+      request<{ categories?: Category[]; source?: string }>('/store/categories', { signal }),
     ]);
     if (appsRes.source === 'unconfigured' || catRes.source === 'unconfigured') {
       return { status: 'unconfigured', apps: [], releases: [], reviews: [], categories: [] };
@@ -274,7 +266,8 @@ export async function fetchCatalog(): Promise<Catalog> {
       reviews: appsRes.reviews ?? [],
       categories: catRes.categories ?? [],
     };
-  } catch {
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'AbortError') throw err;
     return { status: 'unavailable', apps: [], releases: [], reviews: [], categories: [] };
   }
 }
@@ -323,8 +316,8 @@ export const userApi = {
       method: 'POST',
       body: JSON.stringify({ versionCode }),
     }),
-  libraryIds: () => request<{ appIds: string[] }>('/store/library'),
-  wishlistIds: () => request<{ appIds: string[] }>('/store/wishlist'),
+  libraryIds: (signal?: AbortSignal) => request<{ appIds: string[] }>('/store/library', { signal }),
+  wishlistIds: (signal?: AbortSignal) => request<{ appIds: string[] }>('/store/wishlist', { signal }),
 };
 
 // ── Developer console ───────────────────────────────────────────────
@@ -339,7 +332,7 @@ export interface DevBundle {
 export const devApi = {
   register: (d: { displayName: string; orgName: string; supportEmail: string; website?: string }) =>
     request<{ developer: Developer }>('/dev/register', { method: 'POST', body: JSON.stringify(d) }),
-  bundle: () => request<DevBundle>('/dev/apps'),
+  bundle: (signal?: AbortSignal) => request<DevBundle>('/dev/apps', { signal }),
   createApp: (a: Pick<StoreApp, 'name' | 'packageName' | 'category' | 'kind'>) =>
     request<{ app: StoreApp }>('/dev/apps', { method: 'POST', body: JSON.stringify(a) }),
   updateApp: (id: string, patch: Partial<StoreApp>) =>
@@ -372,9 +365,9 @@ export const devApi = {
 
 // ── Admin moderation ────────────────────────────────────────────────
 export const adminApi = {
-  queue: () => request<{ submissions: Submission[]; apps: StoreApp[]; releases: AppRelease[] }>('/admin/queue'),
-  apps: () => request<{ apps: StoreApp[]; releases: AppRelease[]; submissions: Submission[] }>('/admin/apps'),
-  reports: () => request<{ reports: ReportItem[] }>('/admin/reports'),
+  queue: (signal?: AbortSignal) => request<{ submissions: Submission[]; apps: StoreApp[]; releases: AppRelease[] }>('/admin/queue', { signal }),
+  apps: (signal?: AbortSignal) => request<{ apps: StoreApp[]; releases: AppRelease[]; submissions: Submission[] }>('/admin/apps', { signal }),
+  reports: (signal?: AbortSignal) => request<{ reports: ReportItem[] }>('/admin/reports', { signal }),
   decide: (submissionId: string, ok: boolean, note: string) =>
     request<{ submission: Submission }>(
       `/admin/submissions/${encodeURIComponent(submissionId)}/${ok ? 'approve' : 'reject'}`,

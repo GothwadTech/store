@@ -4,19 +4,22 @@ import type {
   AccountSlotItem, AppRelease, Category, Developer, GothwadUser, ReportItem, StoreApp,
 } from '../types';
 import { CATEGORIES, SEED_APPS, SEED_REPORTS, SEED_REVIEWS, SEED_SUBMISSIONS } from '../data/seed';
-import { apkProviderForSize } from './storage';
-import { DEMO_USER, setActiveAuthuser, signOut as authSignOut } from './auth';
-import { isDemoModeAllowed } from './config';
-import { adminApi, ApiError, authApi, devApi, fetchCatalog, fetchSession, userApi } from './api';
-import type { CatalogStatus } from './api';
 import {
-  applyLocalDemoDecide, applyLocalDemoReview, applyLocalDemoSubmit,
-  buildLocalDemoApp, buildLocalDemoRelease, emptyState, mergeById, seedReleases, uid,
-} from './appState';
+  DEMO_USER, bumpAuthGeneration, getActiveAuthuser, setActiveAuthuser, signOut as authSignOut,
+} from './auth';
+import { detectMode, isDemoModeAllowed } from './config';
+import {
+  adminApi, ApiError, authApi, clearInflightSessions, devApi, fetchCatalog,
+  resolveSessionState, userApi, type CatalogStatus, type DeveloperResolutionStatus,
+  type PermissionResolutionStatus,
+} from './api';
+import { createAppActions, emptyState, mergeById, seedReleases } from './appState';
 import type { AppState, NewReleaseInput } from './appState';
 import { withAuthuserPrefix } from './router';
 
 export type { AppState, NewReleaseInput };
+export type AuthStatus = 'loading' | 'authenticated' | 'anonymous' | 'unavailable';
+export type SectionStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 
 const LS_KEY = 'kiwi-store-state-v1';
 let memoryDemoUser: GothwadUser | null = null;
@@ -28,6 +31,15 @@ interface Ctx extends AppState {
   activeSlot: string | null;
   authuser: number;
   authReady: boolean;
+  authStatus: AuthStatus;
+  authError: string | null;
+  permissionsStatus: PermissionResolutionStatus;
+  developerStatus: DeveloperResolutionStatus;
+  developerError: string | null;
+  libraryStatus: SectionStatus;
+  libraryError: string | null;
+  adminStatus: SectionStatus;
+  adminError: string | null;
   isAdmin: boolean;
   backendLive: boolean;
   catalogStatus: CatalogStatus | 'loading';
@@ -39,6 +51,11 @@ interface Ctx extends AppState {
   signOut: () => void;
   signOutSlot: (slotId: string) => Promise<void>;
   switchAccount: (target: { id?: string; authuser?: number }) => Promise<void>;
+  retryAuth: () => Promise<void>;
+  retryCatalog: () => Promise<void>;
+  retryLibrary: () => Promise<void>;
+  retryDeveloper: () => Promise<void>;
+  retryAdmin: () => Promise<void>;
   toggleWishlist: (appId: string) => Promise<void>;
   recordDownload: (app: StoreApp) => Promise<void>;
   addReview: (appId: string, rating: number, body: string) => Promise<void>;
@@ -65,7 +82,7 @@ function loadState(demoModeAvailable: boolean): AppState {
       const parsed = JSON.parse(raw) as AppState;
       if (Array.isArray(parsed.apps) && parsed.apps.length) return parsed;
     }
-  } catch { /* ignore unavailable or invalid local preview state */ }
+  } catch { /* ignore */ }
   return {
     apps: SEED_APPS, releases: seedReleases, reviews: SEED_REVIEWS,
     submissions: SEED_SUBMISSIONS, reports: SEED_REPORTS, wishlist: [], library: [], developer: null,
@@ -84,11 +101,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [backendLive, setBackendLive] = useState(false);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | 'loading'>('loading');
   const [serverAdmin, setServerAdmin] = useState<boolean | null>(null);
+  const [permissionsStatus, setPermissionsStatus] = useState<PermissionResolutionStatus>('loading');
+  const [developerStatus, setDeveloperStatus] = useState<DeveloperResolutionStatus>('loading');
+  const [developerError, setDeveloperError] = useState<string | null>(null);
+  const [libraryStatus, setLibraryStatus] = useState<SectionStatus>('idle');
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [adminStatus, setAdminStatus] = useState<SectionStatus>('idle');
+  const [adminError, setAdminError] = useState<string | null>(null);
   const [user, setUserState] = useState<GothwadUser | null>(() => loadDemoUser(demoModeAvailable));
   const [accounts, setAccounts] = useState<AccountSlotItem[]>([]);
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
-  const [authuser, setAuthuser] = useState<number>(0);
+  const [authuser, setAuthuser] = useState<number>(() => getActiveAuthuser() ?? 0);
   const [authReady, setAuthReady] = useState(false);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -96,6 +122,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const userRef = useRef(user);
   userRef.current = user;
   const demoAllowedRef = useRef(demoModeAvailable);
+  const authGenRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
   const isDemoUser = demoModeAvailable && !!user && user.id === DEMO_USER.id;
   const isDemoUserRef = useRef(isDemoUser);
   isDemoUserRef.current = isDemoUser;
@@ -110,11 +139,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [apiMode, isLocalDemo]);
 
   const patch = useCallback((fn: (s: AppState) => AppState) => setState(fn), []);
+  const clearPrivateState = useCallback(() => {
+    patch((c) => ({
+      ...c,
+      apps: c.apps.filter((app) => app.status === 'published'),
+      releases: c.releases.filter((release) => release.isLive),
+      submissions: [], reports: [], wishlist: [], library: [], developer: null,
+    }));
+  }, [patch]);
 
   useEffect(() => {
-    if (!demoModeAvailable) {
-      try { window.localStorage.removeItem(LS_KEY); } catch { /* ignore */ }
-    }
+    if (!demoModeAvailable) { try { window.localStorage.removeItem(LS_KEY); } catch { /* ignore */ } }
   }, [demoModeAvailable]);
 
   useEffect(() => {
@@ -122,17 +157,124 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try { window.localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch { /* ignore */ }
   }, [state, demoModeAvailable, isDemoUser]);
 
-  const hydrateFromBackend = useCallback(async () => {
-    const [session, catalog] = await Promise.all([fetchSession(), fetchCatalog()]);
-    const realUser = session?.user && session.user.id !== DEMO_USER.id ? session.user : null;
+  const hydrateCatalog = useCallback(async (gen = authGenRef.current) => {
+    const catalog = await fetchCatalog();
+    if (gen !== authGenRef.current) return;
     const isLive = catalog.status === 'ready';
-    liveRef.current = isLive;
-    setBackendLive(isLive);
+    if (isLive) { liveRef.current = true; setBackendLive(true); }
     setCatalogStatus(catalog.status);
     if (isLive) setCategories(catalog.categories);
-    else if (!demoModeAvailable || realUser) setCategories([]);
+    else if (!demoModeAvailable || (userRef.current && userRef.current.id !== DEMO_USER.id)) setCategories([]);
+    if (!isLive) return;
+    setState((c) => ({
+      ...c,
+      apps: mergeById(isDemoUserRef.current ? c.apps : c.apps.filter((a) => a.status !== 'published'), catalog.apps),
+      releases: mergeById(isDemoUserRef.current ? c.releases : c.releases.filter((r) => !r.isLive), catalog.releases),
+      reviews: mergeById(c.reviews, catalog.reviews),
+    }));
+  }, [demoModeAvailable]);
 
-    if (realUser && session) {
+  const hydrateLibrary = useCallback(async (gen = authGenRef.current, signal?: AbortSignal) => {
+    if (!userRef.current || isDemoUserRef.current) return;
+    setLibraryStatus('loading');
+    setLibraryError(null);
+    try {
+      const [lib, wish] = await Promise.all([userApi.libraryIds(signal), userApi.wishlistIds(signal)]);
+      if (gen !== authGenRef.current) return;
+      liveRef.current = true;
+      setBackendLive(true);
+      patch((c) => ({ ...c, library: lib.appIds, wishlist: wish.appIds }));
+      setLibraryStatus('ready');
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError' || gen !== authGenRef.current) return;
+      setLibraryStatus('unavailable');
+      setLibraryError(err instanceof Error ? err.message : 'Could not load your library and wishlist right now.');
+    }
+  }, [patch]);
+
+  const hydrateDeveloper = useCallback(async (gen = authGenRef.current, signal?: AbortSignal) => {
+    if (!userRef.current || isDemoUserRef.current) return;
+    setDeveloperStatus('loading');
+    setDeveloperError(null);
+    try {
+      const bundle = await devApi.bundle(signal);
+      if (gen !== authGenRef.current) return;
+      liveRef.current = true;
+      setBackendLive(true);
+      patch((c) => ({
+        ...c, developer: bundle.developer,
+        apps: mergeById(c.apps, bundle.apps),
+        releases: mergeById(c.releases, bundle.releases),
+        reviews: mergeById(c.reviews, bundle.reviews),
+        submissions: bundle.submissions,
+      }));
+      setDeveloperStatus('ready');
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError' || gen !== authGenRef.current) return;
+      if (err instanceof ApiError && err.status === 403 && err.code === 'developer_required') {
+        liveRef.current = true;
+        setBackendLive(true);
+        patch((c) => ({ ...c, developer: null }));
+        setDeveloperStatus('none');
+        setDeveloperError(null);
+        return;
+      }
+      setDeveloperStatus('unavailable');
+      setDeveloperError(err instanceof Error ? err.message : 'Could not load your developer workspace right now.');
+    }
+  }, [patch]);
+
+  const hydrateAdmin = useCallback(async (gen = authGenRef.current, signal?: AbortSignal) => {
+    if (!userRef.current || isDemoUserRef.current) return;
+    setAdminStatus('loading');
+    setAdminError(null);
+    try {
+      const [adminApps, queue, reports] = await Promise.all([
+        adminApi.apps(signal), adminApi.queue(signal), adminApi.reports(signal),
+      ]);
+      if (gen !== authGenRef.current) return;
+      liveRef.current = true;
+      setBackendLive(true);
+      patch((c) => ({
+        ...c,
+        apps: mergeById(c.apps, adminApps.apps),
+        releases: mergeById(c.releases, [...adminApps.releases, ...queue.releases]),
+        submissions: mergeById(adminApps.submissions, queue.submissions),
+        reports: reports.reports,
+      }));
+      setAdminStatus('ready');
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError' || gen !== authGenRef.current) return;
+      if (err instanceof ApiError && err.status === 403) {
+        setServerAdmin(false);
+        setPermissionsStatus('ready');
+        setAdminStatus('idle');
+        return;
+      }
+      setAdminStatus('unavailable');
+      setAdminError(err instanceof Error ? err.message : 'Could not load moderation data from the Store service.');
+    }
+  }, [patch]);
+
+  const hydrateIdentity = useCallback(async (
+    gen = authGenRef.current,
+    opts?: { force?: boolean; signal?: AbortSignal },
+  ) => {
+    const mode = detectMode();
+    const session = await resolveSessionState({
+      light: mode !== 'console',
+      force: opts?.force,
+      signal: opts?.signal,
+    });
+    if (gen !== authGenRef.current) return;
+
+    const realUser =
+      session.status === 'authenticated' && session.user && session.user.id !== DEMO_USER.id
+        ? session.user
+        : null;
+    if (session.d1Configured) { liveRef.current = true; setBackendLive(true); }
+
+    if (realUser) {
       userRef.current = realUser;
       memoryDemoUser = null;
       setUserState(realUser);
@@ -140,74 +282,72 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setActiveSlot(session.activeSlot);
       setAuthuser(session.authuser);
       setServerAdmin(session.isAdmin);
-    } else {
-      setServerAdmin(null);
-      setAccounts([]);
-      setActiveSlot(null);
-    }
-
-    const preserveLocalDemo = !realUser && isDemoUserRef.current;
-    setState((current) => {
-      const base = realUser ? { ...emptyState, developer: session?.developer ?? null } : current;
-      if (!isLive) return base;
-      if (preserveLocalDemo) {
-        return {
-          ...base,
-          apps: mergeById(base.apps, catalog.apps),
-          releases: mergeById(base.releases, catalog.releases),
-          reviews: mergeById(base.reviews, catalog.reviews),
-        };
-      }
-      return {
-        ...base, apps: catalog.apps, releases: catalog.releases,
-        reviews: catalog.reviews, submissions: [], reports: [],
-      };
-    });
-
-    if (!isLive || !realUser) {
+      setPermissionsStatus(session.permissionsStatus);
+      setAuthStatus('authenticated');
+      setAuthError(session.errorMessage ?? null);
+      if (session.developer) patch((c) => ({ ...c, developer: session.developer }));
+      setDeveloperStatus(session.developerStatus);
       setAuthReady(true);
+
+      if (mode === 'store') {
+        void hydrateLibrary(gen, opts?.signal);
+      } else if (mode === 'console') {
+        if (session.permissionsStatus === 'unavailable' || session.developerStatus === 'unavailable') {
+          setDeveloperStatus('unavailable');
+          setDeveloperError(session.errorMessage || 'Developer tools are unavailable until the Store service is connected.');
+        } else if (session.developerStatus === 'none') {
+          liveRef.current = true;
+          setBackendLive(true);
+          patch((c) => ({ ...c, developer: null }));
+          setDeveloperStatus('none');
+        } else {
+          void hydrateDeveloper(gen, opts?.signal);
+        }
+      } else if (mode === 'admin' && session.permissionsStatus === 'ready' && session.isAdmin === true) {
+        void hydrateAdmin(gen, opts?.signal);
+      }
       return;
     }
 
-    try {
-      const [library, wishlist] = await Promise.all([userApi.libraryIds(), userApi.wishlistIds()]);
-      patch((current) => ({ ...current, library: library.appIds, wishlist: wishlist.appIds }));
-    } catch { /* keep empty */ }
-
-    if (session?.developer) {
-      try {
-        const bundle = await devApi.bundle();
-        patch((current) => ({
-          ...current, developer: bundle.developer,
-          apps: mergeById(current.apps, bundle.apps),
-          releases: mergeById(current.releases, bundle.releases),
-          reviews: mergeById(current.reviews, bundle.reviews),
-          submissions: bundle.submissions,
-        }));
-      } catch { /* ignore */ }
-    }
-
-    if (session?.isAdmin) {
-      try {
-        const [adminApps, queue, reports] = await Promise.all([adminApi.apps(), adminApi.queue(), adminApi.reports()]);
-        patch((current) => ({
-          ...current,
-          apps: mergeById(current.apps, adminApps.apps),
-          releases: mergeById(current.releases, [...adminApps.releases, ...queue.releases]),
-          submissions: mergeById(adminApps.submissions, queue.submissions),
-          reports: reports.reports,
-        }));
-      } catch { /* ignore */ }
+    if (!isDemoUserRef.current) { userRef.current = null; setUserState(null); }
+    setAccounts([]);
+    setActiveSlot(null);
+    if (session.status === 'unavailable') {
+      setServerAdmin(null);
+      setPermissionsStatus('unavailable');
+      setDeveloperStatus('unavailable');
+      setAuthStatus('unavailable');
+      setAuthError(session.errorMessage || 'Could not verify your Gothwad Account right now. Please try again.');
+    } else {
+      setServerAdmin(false);
+      setPermissionsStatus('ready');
+      setDeveloperStatus('none');
+      setAuthStatus('anonymous');
+      setAuthError(null);
     }
     setAuthReady(true);
-  }, [demoModeAvailable, patch]);
+  }, [hydrateAdmin, hydrateDeveloper, hydrateLibrary, patch]);
 
-  useEffect(() => { void hydrateFromBackend(); }, [hydrateFromBackend]);
+  const hydrateFromBackend = useCallback(async (opts?: { force?: boolean }) => {
+    const gen = authGenRef.current;
+    await Promise.all([hydrateIdentity(gen, { force: opts?.force }), hydrateCatalog(gen)]);
+  }, [hydrateCatalog, hydrateIdentity]);
+
+  useEffect(() => {
+    const gen = authGenRef.current;
+    void hydrateIdentity(gen);
+    void hydrateCatalog(gen);
+  }, [hydrateCatalog, hydrateIdentity]);
 
   const setUser = useCallback((next: GothwadUser | null) => {
     if (!demoModeAvailable && next?.id === DEMO_USER.id) return;
+    authGenRef.current = bumpAuthGeneration();
+    clearInflightSessions();
     userRef.current = next;
     setUserState(next);
+    setAuthStatus(next ? 'authenticated' : 'anonymous');
+    setAuthError(null);
+    setAuthReady(true);
     memoryDemoUser = demoModeAvailable && next?.id === DEMO_USER.id ? DEMO_USER : null;
   }, [demoModeAvailable]);
 
@@ -215,254 +355,125 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     const wasLocalDemo = isLocalDemo();
+    abortRef.current?.abort();
+    abortRef.current = null;
+    authGenRef.current = bumpAuthGeneration();
+    clearInflightSessions();
     void authSignOut();
-    setServerAdmin(null);
+    setServerAdmin(false);
+    setPermissionsStatus('ready');
+    setDeveloperStatus('none');
+    setDeveloperError(null);
+    setLibraryStatus('idle');
+    setLibraryError(null);
+    setAdminStatus('idle');
+    setAdminError(null);
     setAccounts([]);
     setActiveSlot(null);
-    setUser(null);
-    if (!wasLocalDemo) {
-      patch((current) => ({
-        ...current,
-        apps: current.apps.filter((app) => app.status === 'published'),
-        releases: current.releases.filter((release) => release.isLive),
-        submissions: [], reports: [], wishlist: [], library: [], developer: null,
-      }));
-    }
-  }, [isLocalDemo, patch, setUser]);
+    userRef.current = null;
+    memoryDemoUser = null;
+    setUserState(null);
+    setAuthStatus('anonymous');
+    setAuthError(null);
+    if (!wasLocalDemo) clearPrivateState();
+  }, [clearPrivateState, isLocalDemo]);
 
   const signOutSlot = useCallback(async (slotId: string) => {
     const trimmed = typeof slotId === 'string' ? slotId.trim() : '';
     if (!trimmed) return;
+    abortRef.current?.abort();
+    authGenRef.current = bumpAuthGeneration();
+    clearInflightSessions();
     await authSignOut(trimmed);
-    await hydrateFromBackend();
-  }, [hydrateFromBackend]);
+    clearPrivateState();
+    await hydrateFromBackend({ force: true });
+  }, [clearPrivateState, hydrateFromBackend]);
 
   const switchAccount = useCallback(async (target: { id?: string; authuser?: number }) => {
-    try { await authApi.switchAccount(target); } catch { /* ignore if cross-origin cookie switch fallback */ }
-    if (typeof target.authuser === 'number') {
-      setActiveAuthuser(target.authuser);
-      setAuthuser(target.authuser);
-      const nextPath = withAuthuserPrefix(window.location.pathname, target.authuser);
+    const res = await authApi.switchAccount(target);
+    if (res && res.ok === false) throw new ApiError(502, 'switch_failed', 'Could not switch accounts. Please try again.');
+    abortRef.current?.abort();
+    authGenRef.current = bumpAuthGeneration();
+    clearInflightSessions();
+    clearPrivateState();
+    setServerAdmin(null);
+    setPermissionsStatus('loading');
+    setDeveloperStatus('loading');
+    setDeveloperError(null);
+    setLibraryStatus('idle');
+    setLibraryError(null);
+    setAdminStatus('idle');
+    setAdminError(null);
+    const nextAuthuser = typeof res?.authuser === 'number' ? res.authuser : target.authuser;
+    if (typeof nextAuthuser === 'number') {
+      setActiveAuthuser(nextAuthuser);
+      setAuthuser(nextAuthuser);
+      const nextPath = withAuthuserPrefix(window.location.pathname, nextAuthuser);
       window.history.replaceState({}, '', nextPath + window.location.search);
     }
-    await hydrateFromBackend();
-  }, [hydrateFromBackend]);
+    await hydrateFromBackend({ force: true });
+  }, [clearPrivateState, hydrateFromBackend]);
 
-  const toggleWishlist = useCallback(async (appId: string) => {
-    assertCanWrite();
-    const wished = stateRef.current.wishlist.includes(appId);
-    if (apiMode()) await userApi.setWishlist(appId, !wished);
-    patch((current) => ({
-      ...current,
-      wishlist: wished ? current.wishlist.filter((id) => id !== appId) : [...current.wishlist, appId],
-    }));
-  }, [assertCanWrite, patch, apiMode]);
+  const retryAuth = useCallback(async () => {
+    const gen = bumpAuthGeneration();
+    authGenRef.current = gen;
+    clearInflightSessions();
+    setAuthStatus('loading');
+    setAuthError(null);
+    await hydrateIdentity(gen, { force: true });
+  }, [hydrateIdentity]);
 
-  const recordDownload = useCallback(async (app: StoreApp) => {
-    if (!isLocalDemo()) return;
-    patch((current) => ({
-      ...current,
-      apps: current.apps.map((item) => (item.id === app.id ? { ...item, downloadsCount: item.downloadsCount + 1 } : item)),
-      library: current.library.includes(app.id) ? current.library : [...current.library, app.id],
-    }));
-  }, [isLocalDemo, patch]);
+  const retryCatalog = useCallback(async () => {
+    setCatalogStatus('loading');
+    await hydrateCatalog(authGenRef.current);
+  }, [hydrateCatalog]);
 
-  const addReview = useCallback(async (appId: string, rating: number, body: string) => {
-    assertCanWrite();
-    const currentUser = userRef.current;
-    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in to continue.');
-    if (apiMode()) {
-      const { review } = await userApi.addReview(appId, rating, body);
-      patch((current) => {
-        const reviews = [...current.reviews.filter((item) => !(item.appId === appId && item.userId === currentUser.id)), review];
-        const forApp = reviews.filter((item) => item.appId === appId);
-        const average = forApp.reduce((total, item) => total + item.rating, 0) / Math.max(1, forApp.length);
-        return {
-          ...current, reviews,
-          apps: current.apps.map((app) => (app.id === appId ? { ...app, ratingAvg: Math.round(average * 10) / 10, ratingCount: forApp.length } : app)),
-        };
-      });
-      return;
-    }
-    patch((current) => applyLocalDemoReview(current, appId, currentUser, rating, body));
-  }, [assertCanWrite, patch, apiMode]);
+  const retryLibrary = useCallback(async () => { await hydrateLibrary(authGenRef.current); }, [hydrateLibrary]);
+  const retryDeveloper = useCallback(async () => {
+    if (permissionsStatus === 'unavailable') { await retryAuth(); return; }
+    await hydrateDeveloper(authGenRef.current);
+  }, [hydrateDeveloper, permissionsStatus, retryAuth]);
+  const retryAdmin = useCallback(async () => {
+    if (permissionsStatus !== 'ready' || !serverAdmin) { await retryAuth(); return; }
+    await hydrateAdmin(authGenRef.current);
+  }, [hydrateAdmin, permissionsStatus, retryAuth, serverAdmin]);
 
-  const replyReview = useCallback(async (reviewId: string, reply: string) => {
-    assertCanWrite();
-    if (apiMode()) {
-      const review = stateRef.current.reviews.find((item) => item.id === reviewId);
-      if (!review) return;
-      const { review: saved } = await devApi.reply(review.appId, reviewId, reply);
-      patch((current) => ({ ...current, reviews: current.reviews.map((item) => (item.id === reviewId ? saved : item)) }));
-      return;
-    }
-    patch((current) => ({
-      ...current,
-      reviews: current.reviews.map((item) =>
-        item.id === reviewId ? { ...item, developerReply: reply, developerReplyAt: new Date().toISOString() } : item,
-      ),
-    }));
-  }, [assertCanWrite, patch, apiMode]);
-
-  const registerDeveloper = useCallback(async (data: Omit<Developer, 'id' | 'userId' | 'username' | 'verified' | 'createdAt'>) => {
-    assertCanWrite();
-    const currentUser = userRef.current;
-    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in to continue.');
-    if (apiMode()) {
-      const { developer } = await devApi.register(data);
-      patch((current) => ({ ...current, developer }));
-      return;
-    }
-    patch((current) => ({
-      ...current,
-      developer: { ...data, id: 'dev-' + currentUser.username, userId: currentUser.id, username: currentUser.username, verified: false, createdAt: new Date().toISOString() },
-    }));
-  }, [assertCanWrite, patch, apiMode]);
-
-  const createApp = useCallback(async (data: Pick<StoreApp, 'name' | 'packageName' | 'category' | 'kind'>): Promise<StoreApp> => {
-    assertCanWrite();
-    if (apiMode()) {
-      const { app } = await devApi.createApp(data);
-      patch((current) => ({ ...current, apps: [app, ...current.apps.filter((item) => item.id !== app.id)] }));
-      return app;
-    }
-    const created = buildLocalDemoApp(stateRef.current, userRef.current, data);
-    patch((current) => ({ ...current, apps: [created, ...current.apps] }));
-    return created;
-  }, [assertCanWrite, patch, apiMode]);
-
-  const updateApp = useCallback(async (id: string, changes: Partial<StoreApp>) => {
-    assertCanWrite();
-    if (apiMode()) {
-      const { app } = await devApi.updateApp(id, changes);
-      patch((current) => ({ ...current, apps: current.apps.map((item) => (item.id === id ? app : item)) }));
-      return;
-    }
-    patch((current) => ({
-      ...current,
-      apps: current.apps.map((item) => (item.id === id ? { ...item, ...changes, updatedAt: new Date().toISOString() } : item)),
-    }));
-  }, [assertCanWrite, patch, apiMode]);
-
-  const addRelease = useCallback(async (appId: string, releaseInput: NewReleaseInput): Promise<AppRelease> => {
-    assertCanWrite();
-    if (apiMode()) {
-      const { release } = await devApi.createRelease(appId, {
-        versionName: releaseInput.versionName,
-        versionCode: releaseInput.versionCode,
-        changelog: releaseInput.changelog,
-        permissions: releaseInput.manifest?.permissions?.length ? releaseInput.manifest.permissions : releaseInput.permissions,
-        manifest: releaseInput.manifest ?? undefined,
-        apk: {
-          provider: releaseInput.apkProvider ?? apkProviderForSize(releaseInput.sizeBytes),
-          url: releaseInput.apkUrl ?? '',
-          key: releaseInput.apkKey ?? releaseInput.apkName,
-          sizeBytes: releaseInput.sizeBytes,
-          sha256: releaseInput.apkSha256,
-        },
-      });
-      patch((current) => ({ ...current, releases: [release, ...current.releases.filter((item) => item.id !== release.id)] }));
-      return release;
-    }
-    const release = buildLocalDemoRelease(appId, releaseInput);
-    patch((current) => ({ ...current, releases: [release, ...current.releases] }));
-    return release;
-  }, [assertCanWrite, patch, apiMode]);
-
-  const submitForReview = useCallback(async (appId: string, releaseId: string) => {
-    assertCanWrite();
-    if (apiMode()) {
-      const { submission } = await devApi.submit(appId, releaseId);
-      patch((current) => ({
-        ...current,
-        submissions: [submission, ...current.submissions.filter((item) => item.id !== submission.id)],
-        apps: current.apps.map((app) => (app.id === appId && app.status !== 'published' ? { ...app, status: 'in_review' } : app)),
-      }));
-      return;
-    }
-    patch((current) => applyLocalDemoSubmit(current, appId, releaseId));
-  }, [assertCanWrite, patch, apiMode]);
-
-  const decideSubmission = useCallback(async (id: string, approved: boolean, note: string) => {
-    assertCanWrite();
-    if (apiMode()) {
-      const { submission } = await adminApi.decide(id, approved, note);
-      try {
-        const [adminApps, queue] = await Promise.all([adminApi.apps(), adminApi.queue()]);
-        patch((current) => ({
-          ...current,
-          apps: mergeById(current.apps.filter((app) => !adminApps.apps.some((item) => item.id === app.id)), adminApps.apps),
-          releases: mergeById(current.releases, [...adminApps.releases, ...queue.releases]),
-          submissions: mergeById([submission], [...adminApps.submissions, ...queue.submissions].filter((item) => item.id !== submission.id)),
-        }));
-      } catch {
-        patch((current) => ({ ...current, submissions: current.submissions.map((item) => (item.id === id ? submission : item)) }));
-      }
-      return;
-    }
-    patch((current) => applyLocalDemoDecide(current, id, approved, note, userRef.current?.username));
-  }, [assertCanWrite, patch, apiMode]);
-
-  const setAppStatus = useCallback(async (id: string, status: StoreApp['status']) => {
-    assertCanWrite();
-    if (apiMode()) {
-      const app = stateRef.current.apps.find((item) => item.id === id);
-      const mine = !!app && !!stateRef.current.developer && app.developerId === stateRef.current.developer.id;
-      let saved: StoreApp | null = null;
-      if (status === 'suspended') saved = (await adminApi.suspend(id)).app;
-      else if (status === 'published' && (!mine || app?.status === 'suspended')) saved = (await adminApi.restore(id)).app;
-      else if (status === 'published' || status === 'unlisted') saved = (await devApi.setStatus(id, status)).app;
-      if (saved) patch((current) => ({ ...current, apps: current.apps.map((item) => (item.id === id ? saved! : item)) }));
-      return;
-    }
-    patch((current) => ({ ...current, apps: current.apps.map((item) => (item.id === id ? { ...item, status } : item)) }));
-  }, [assertCanWrite, patch, apiMode]);
-
-  const reportApp = useCallback(async (app: StoreApp, reason: string, details: string) => {
-    assertCanWrite();
-    const currentUser = userRef.current;
-    if (!currentUser) throw new ApiError(401, 'unauthorized', 'Please sign in to continue.');
-    if (apiMode()) {
-      const { report } = await userApi.report(app.id, reason, details);
-      if (report) patch((current) => ({ ...current, reports: [report, ...current.reports] }));
-      return;
-    }
-    patch((current) => ({
-      ...current,
-      reports: [{ id: 'rep-' + uid(), appId: app.id, appName: app.name, reporter: currentUser.username, reason, details, status: 'open', createdAt: new Date().toISOString() }, ...current.reports],
-    }));
-  }, [assertCanWrite, patch, apiMode]);
-
-  const resolveReport = useCallback(async (id: string, status: ReportItem['status']) => {
-    assertCanWrite();
-    if (apiMode() && (status === 'resolved' || status === 'dismissed')) {
-      const { report } = await adminApi.resolveReport(id, status);
-      patch((current) => ({ ...current, reports: current.reports.map((item) => (item.id === id ? report : item)) }));
-      return;
-    }
-    patch((current) => ({ ...current, reports: current.reports.map((item) => (item.id === id ? { ...item, status } : item)) }));
-  }, [assertCanWrite, patch, apiMode]);
+  const actions = useMemo(
+    () =>
+      createAppActions({
+        getState: () => stateRef.current,
+        getUser: () => userRef.current,
+        apiMode,
+        isLocalDemo,
+        assertCanWrite,
+        patch,
+        setDeveloperStatus,
+      }),
+    [apiMode, assertCanWrite, isLocalDemo, patch],
+  );
 
   const liveReleaseOf = useCallback(
-    (appId: string) => state.releases.filter((release) => release.appId === appId && release.isLive).sort((a, b) => b.versionCode - a.versionCode)[0],
+    (appId: string) => state.releases.filter((r) => r.appId === appId && r.isLive).sort((a, b) => b.versionCode - a.versionCode)[0],
     [state.releases],
   );
 
   const value: Ctx = useMemo(
     () => ({
-      ...state, categories, user, accounts, activeSlot, authuser, authReady, backendLive, catalogStatus,
-      demoModeAvailable, isDemoUser, isPreviewMode,
-      isAdmin: serverAdmin ?? (isDemoUser && user?.username === DEMO_USER.username),
-      setUser, signInDemo, signOut, signOutSlot, switchAccount, toggleWishlist, recordDownload,
-      addReview, replyReview, registerDeveloper, createApp, updateApp, addRelease,
-      submitForReview, decideSubmission, setAppStatus, reportApp, resolveReport, liveReleaseOf,
+      ...state, categories, user, accounts, activeSlot, authuser, authReady, authStatus, authError,
+      permissionsStatus, developerStatus, developerError, libraryStatus, libraryError, adminStatus, adminError,
+      backendLive, catalogStatus, demoModeAvailable, isDemoUser, isPreviewMode,
+      isAdmin: serverAdmin === true || (isDemoUser && user?.username === DEMO_USER.username),
+      setUser, signInDemo, signOut, signOutSlot, switchAccount,
+      retryAuth, retryCatalog, retryLibrary, retryDeveloper, retryAdmin,
+      ...actions, liveReleaseOf,
     }),
     [
-      state, categories, user, accounts, activeSlot, authuser, authReady, backendLive, catalogStatus,
-      demoModeAvailable, isDemoUser, isPreviewMode, serverAdmin, setUser, signInDemo, signOut,
-      signOutSlot, switchAccount, toggleWishlist, recordDownload, addReview, replyReview,
-      registerDeveloper, createApp, updateApp, addRelease, submitForReview, decideSubmission,
-      setAppStatus, reportApp, resolveReport, liveReleaseOf,
+      state, categories, user, accounts, activeSlot, authuser, authReady, authStatus, authError,
+      permissionsStatus, developerStatus, developerError, libraryStatus, libraryError, adminStatus, adminError,
+      backendLive, catalogStatus, demoModeAvailable, isDemoUser, isPreviewMode, serverAdmin,
+      setUser, signInDemo, signOut, signOutSlot, switchAccount,
+      retryAuth, retryCatalog, retryLibrary, retryDeveloper, retryAdmin,
+      actions, liveReleaseOf,
     ],
   );
 

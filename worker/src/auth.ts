@@ -120,7 +120,25 @@ export async function resolveSession(req: Request, env: Env): Promise<SessionRes
           });
         }
         if (r.ok) {
-          const u = (await r.json()) as Record<string, unknown>;
+          const text = await r.text();
+          let u: Record<string, unknown> | null = null;
+          try {
+            const parsed = text ? JSON.parse(text) : null;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              u = parsed as Record<string, unknown>;
+            }
+          } catch {
+            u = null;
+          }
+          if (!u) {
+            return {
+              user: null,
+              activeSlot: null,
+              authuser: hint ?? 0,
+              accounts: [],
+              upstreamUnavailable: true,
+            };
+          }
           const user = normalizeUser(u, env);
           if (user) {
             return {
@@ -131,11 +149,11 @@ export async function resolveSession(req: Request, env: Env): Promise<SessionRes
               accountUrl: `${brandFor(env).accountsSignInUrl}/u/${hint ?? 0}/me`,
             };
           }
-        } else if (r.status >= 500) {
+        } else if (r.status === 429 || r.status >= 500) {
           return {
             user: null,
             activeSlot: null,
-            authuser: 0,
+            authuser: hint ?? 0,
             accounts: [],
             upstreamUnavailable: true,
           };
@@ -177,7 +195,25 @@ export async function resolveSession(req: Request, env: Env): Promise<SessionRes
           upstreamUnavailable: true,
         };
       }
-      const d = (await r.json()) as Record<string, unknown>;
+      const text = await r.text();
+      let d: Record<string, unknown> | null = null;
+      try {
+        const parsed = text ? JSON.parse(text) : null;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          d = parsed as Record<string, unknown>;
+        }
+      } catch {
+        d = null;
+      }
+      if (!d) {
+        return {
+          user: null,
+          activeSlot: null,
+          authuser: hint ?? 0,
+          accounts: [],
+          upstreamUnavailable: true,
+        };
+      }
       const activeSlot =
         typeof d.activeId === 'string'
           ? d.activeId
@@ -186,10 +222,13 @@ export async function resolveSession(req: Request, env: Env): Promise<SessionRes
             : null;
       const authuser = typeof d.authuser === 'number' ? d.authuser : (hint ?? 0);
       const accounts = normalizeAccounts(d.accounts, activeSlot, env);
-      const userObj =
+      const rawUser =
         d.authenticated !== false && d.user && typeof d.user === 'object'
-          ? normalizeUser(d.user as Record<string, unknown>, env)
-          : null;
+          ? (d.user as Record<string, unknown>)
+          : d.authenticated !== false
+            ? (accounts.find((a) => a.active) as unknown as Record<string, unknown> | undefined)
+            : undefined;
+      const userObj = rawUser ? normalizeUser(rawUser, env) : null;
 
       return {
         user: userObj,
@@ -218,6 +257,12 @@ export async function verifyUser(req: Request, env: Env): Promise<AuthUser | nul
 }
 
 export async function handleMe(req: Request, env: Env): Promise<Response> {
+  const url = new URL(req.url);
+  const light =
+    url.pathname === '/api/auth/session' ||
+    url.searchParams.get('light') === '1' ||
+    url.searchParams.get('deferDeveloper') === '1';
+
   const session = await resolveSession(req, env);
   if (session.upstreamUnavailable) {
     return err('auth_unavailable', 'Gothwad Accounts service is temporarily unavailable', 503);
@@ -227,10 +272,12 @@ export async function handleMe(req: Request, env: Env): Promise<Response> {
     return json(
       {
         authenticated: false,
+        authoritative: true,
         error: 'unauthorized',
-        message: 'Please sign in with Gothwad',
+        message: 'Please sign in.',
         user: null,
         developer: null,
+        developerStatus: 'none',
         isAdmin: false,
         activeSlot,
         activeId: activeSlot,
@@ -241,18 +288,37 @@ export async function handleMe(req: Request, env: Env): Promise<Response> {
     );
   }
 
-  let developer: ReturnType<typeof mapDeveloper> | null = null;
-  if (hasD1(env)) {
-    await ensureSchema(env.DB, env);
-    const devRow = await getDeveloperForUser(env.DB, user);
-    if (devRow) developer = mapDeveloper(devRow);
-  }
   const d1Ready = hasD1(env);
   const ghReady = Boolean(githubToken(env));
+  let developer: ReturnType<typeof mapDeveloper> | null = null;
+  let developerStatus: 'ready' | 'none' | 'deferred' | 'unavailable' = light
+    ? 'deferred'
+    : d1Ready
+      ? 'none'
+      : 'unavailable';
+
+  if (!light && d1Ready) {
+    try {
+      await ensureSchema(env.DB, env);
+      const devRow = await getDeveloperForUser(env.DB, user);
+      if (devRow) {
+        developer = mapDeveloper(devRow);
+        developerStatus = 'ready';
+      } else {
+        developerStatus = 'none';
+      }
+    } catch {
+      developer = null;
+      developerStatus = 'unavailable';
+    }
+  }
+
   return json({
     authenticated: true,
+    authoritative: true,
     user,
     developer,
+    developerStatus,
     isAdmin: isAdmin(user, env),
     activeSlot,
     activeId: activeSlot,
